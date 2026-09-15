@@ -200,7 +200,7 @@ def _query_course(db: Database, course_id: str,
         "SELECT * FROM courses WHERE course_id = ?", (course_id,)
     ).fetchone()
     if not course:
-        print(f"Course {course_id} not found in database – skipping.")
+        print("Requested course not found in database – skipping.")
         return None
 
     course_title = course["title"]
@@ -220,10 +220,10 @@ def _query_course(db: Database, course_id: str,
         lectures = [lec for lec in lectures if str(lec["sub_id"]) in wanted]
 
     if not lectures:
-        print(f"No summaries found for course {course_id} ({course_title}) – skipping.")
+        print("No summaries found for requested course – skipping.")
         return None
 
-    print(f"Found {len(lectures)} summarized lecture(s) for {course_title}.")
+    print(f"Found {len(lectures)} summarized lecture(s).")
     return course_title, teacher, lectures
 
 
@@ -270,7 +270,7 @@ def main():
     # Parse optional sub_ids filter
     sub_ids = [s.strip() for s in args.sub_ids.split(",") if s.strip()] or None
     if sub_ids:
-        print(f"Filtering to {len(sub_ids)} sub_id(s): {', '.join(sub_ids)}")
+        print(f"Filtering to {len(sub_ids)} selected lecture(s).")
 
     if not config.SMTP_EMAIL or not config.SMTP_PASSWORD or not config.RECEIVER_EMAIL:
         print("Email configuration incomplete. Set SMTP_EMAIL, SMTP_PASSWORD, RECEIVER_EMAIL.")
@@ -294,11 +294,11 @@ def main():
             titles.append(course_title)
 
             html = _build_html(course_title, teacher, lectures, pdf=True)
-            print(f"Generating PDF for {course_title}...")
+            print("Generating PDF for requested course...")
             pdf_bytes = weasyprint.HTML(string=html).write_pdf()
             filename = f"{_safe_filename(course_title)}_summaries.pdf"
             attachments.append((pdf_bytes, filename))
-            print(f"  PDF ready ({len(pdf_bytes)} bytes): {filename}")
+            print(f"  PDF ready ({len(pdf_bytes)} bytes; filename redacted)")
 
         if not attachments:
             print("No courses with summaries found – nothing to send.")
@@ -308,7 +308,7 @@ def main():
         total_bytes = sum(len(b) for b, _ in attachments)
         print(f"Sending email with {len(attachments)} PDF(s) ({total_bytes} bytes)...")
         _send_pdf_email(subject, attachments)
-        print(f"[OK] Sent: {subject}")
+        print("[OK] PDF email sent (subject redacted)")
 
     elif args.md:
         # Markdown mode: one MD file per course, all files in one email
@@ -325,7 +325,7 @@ def main():
             markdown_bytes = markdown.encode("utf-8")
             filename = f"{_safe_filename(course_title)}_summaries.md"
             attachments.append((markdown_bytes, filename))
-            print(f"  Markdown ready ({len(markdown_bytes)} bytes): {filename}")
+            print(f"  Markdown ready ({len(markdown_bytes)} bytes; filename redacted)")
 
         if not attachments:
             print("No courses with summaries found – nothing to send.")
@@ -335,7 +335,7 @@ def main():
         total_bytes = sum(len(b) for b, _ in attachments)
         print(f"Sending email with {len(attachments)} MD(s) ({total_bytes} bytes)...")
         _send_md_email(subject, attachments)
-        print(f"[OK] Sent: {subject}")
+        print("[OK] Markdown email sent (subject redacted)")
 
     else:
         # Email mode: one CID-embedded HTML email per course
@@ -352,11 +352,11 @@ def main():
             plain = _build_plain(course_title, teacher, lectures)
             subject = f"[iCourse 课程摘要导出] {course_title}"
 
-            print(f"Sending HTML email for {course_title}...")
+            print("Sending HTML email for requested course...")
             if cid_images:
                 print(f"  Embedded {len(cid_images)} LaTeX image(s) as CID")
             _send_html_email(subject, html, plain, cid_images=cid_images)
-            print(f"[OK] Sent: {subject}")
+            print("[OK] HTML email sent (subject redacted)")
             sent += 1
 
         if sent == 0:

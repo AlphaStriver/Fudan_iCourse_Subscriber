@@ -46,7 +46,7 @@ def fetch_ppt_image(client: "ICourseClient", item: dict,
             return resp.content
         except Exception as e:
             print(f"[PPTFetcher] download failed (attempt "
-                  f"{attempt}/{max_attempts}): {type(e).__name__}: {e}")
+                  f"{attempt}/{max_attempts}): {type(e).__name__}")
             if attempt < max_attempts:
                 time.sleep(1)
     return None
@@ -483,8 +483,8 @@ class ICourseClient:
         try:
             info = self.get_sub_info(course_id, sub_id)
         except Exception as e:
-            print(f"    sub-info unavailable for {sub_id} "
-                  f"({type(e).__name__}); falling back to sub-detail")
+            print(f"    Sub-info unavailable ({type(e).__name__}); "
+                  "falling back to sub-detail")
             info = {}
 
         # Get server timestamp for signing
@@ -540,8 +540,7 @@ class ICourseClient:
                 pass
 
         if not base_url:
-            print(f"    No video URL found for {sub_id} (tried video_list, "
-                  f"playurl, content.playback, sub_detail)")
+            print("    No video URL found (tried all configured sources)")
             return None
 
         return self.sign_video_url(base_url, now=now)

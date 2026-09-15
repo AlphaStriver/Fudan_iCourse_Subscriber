@@ -134,7 +134,7 @@ def _fetch_latex_image(url: str, dpi: int = 300) -> tuple:
         _IMAGE_CACHE[url] = result
         return result
     except Exception as e:
-        print(f"[LaTeX Render] Image fetch failed: {e}")
+        print(f"[LaTeX Render] Image fetch failed: {type(e).__name__}")
         return None, None, None
 
 
@@ -413,10 +413,11 @@ class Emailer:
                 with smtplib.SMTP_SSL(self.host, self.port) as server:
                     server.login(self.sender, self.password)
                     server.sendmail(self.sender, self.receiver, msg.as_string())
-                print(f"[Emailer] Sent: {subject}")
+                print("[Emailer] Sent successfully (subject redacted)")
                 return True
             except Exception as e:
-                print(f"[Emailer] Attempt {attempt + 1}/3 failed: {e}")
+                print(f"[Emailer] Attempt {attempt + 1}/3 failed: "
+                      f"{type(e).__name__}")
                 if attempt < 2:
                     time.sleep(2 ** attempt)
 

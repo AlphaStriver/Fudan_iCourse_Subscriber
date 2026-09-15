@@ -1,5 +1,10 @@
 # iCourse Subscriber V2
 
+> [!IMPORTANT]
+> 本 Fork 仅对个人信息保护做了加固：公开 Actions 日志和手动参数脱敏，并使用独立
+> `DB_ENCRYPTION_KEY`。课程处理逻辑保持上游行为。部署前请先阅读
+> [PERSONAL_DEPLOYMENT.md](PERSONAL_DEPLOYMENT.md)。
+
 自动监控复旦大学 iCourse 智慧教学平台的课程更新，对新课次的录播视频进行**语音转文字 + PPT OCR + AI 摘要**，并通过邮件推送到你的邮箱。
 
 部署在 GitHub Actions 上，每天定时运行，**零成本、免服务器、全自动**。
@@ -36,6 +41,7 @@
 | `STUID` | ✅ | 复旦学号 | `22307110000` |
 | `UISPSW` | ✅ | UIS 统一身份认证密码 | `your_password` |
 | `COURSE_IDS` | ✅ | 要监控的课程 ID，多个用英文逗号分隔 | `35472,30251` |
+| `DB_ENCRYPTION_KEY` | ✅ | 独立数据库密钥；用 `openssl rand -hex 32` 生成 | `64位随机十六进制字符串` |
 | `DASHSCOPE_API_KEY` | ⬜ | ModelScope 平台 API Key | `ms-xxxxxxxx` |
 | `DEEPSEEK_API_KEY` | ⬜ | DeepSeek API Key（推荐） | `sk-xxxxxxxx` |
 | `GEMINI_API_KEY` | ⬜ | Gemini API Key | `AIza...` |
@@ -74,24 +80,17 @@
 
 - **自动运行**：默认每天 19:36（北京时间）自动执行
 - **手动触发**：进入仓库 → Actions → **iCourse Check** → Run workflow
-- **立即触发**：也可通过前端页面点击「触发订阅检查」按钮
 
-首次运行会处理所有已有录播，后续只处理新增课次。
+首次运行会处理所有已有录播，后续只处理新增课次。详细的隐私配置步骤见
+[个人部署说明](PERSONAL_DEPLOYMENT.md)。
 
 ## 前端页面（索引与查看）
 
 ![alt text](docs/frontend.png)
 
-本项目自带一个浏览器端加密数据库查看器，部署在 GitHub Pages：
-
-访问 `https://你的用户名.github.io/Fudan_iCourse_Subscriber/`
-
-功能介绍：
-- **浏览器端解密**：输入你的凭据，浏览器用 WebCrypto 解密 sql.js 读取 shard 数据库，凭据不离开本地
-- **按课程/课次浏览**：查看每节课的转录和摘要内容
-- **导出 PDF**：通过 GitHub Actions 触发导出工作流，生成格式化课程笔记 PDF 并邮件发送
-
-> 前端页面需要你手动在 GitHub Pages 设置中开启（Settings → Pages → Source → GitHub Actions），然后触发一次 Deploy Frontend workflow 即可部署。
+本 Fork 保留上游前端代码和部署 workflow，但当前个人部署不启用它：前端会在浏览器
+中保存 UIS 凭证和高权限 GitHub PAT，而且不兼容独立 `DB_ENCRYPTION_KEY`。如需使用，
+应另行完成安全改造后再启用；当前通过邮件接收摘要。
 
 > [!TIP]
 >
@@ -213,7 +212,9 @@ PPT 功能区 UI 噪声清洗：PowerPoint 功能区标签（"文件""开始""�
 
 GitHub Actions 每次在全新容器中运行，无法依赖本地文件系统持久化。解决方案是独立的 `data` 分支，每次运行结束时加密推送数据库，下次运行时拉取解密。
 
-AES-256-CBC + PBKDF2 加密方案需要在三种环境中同时兼容：GitHub Actions shell（openssl CLI）、Python（pycryptodome 库）、浏览器前端（Web Crypto API）。`crypto_box.py` 和 `frontend/js/crypto.js` 保持精确对应——相同的 Salted__ 头部格式、相同的 PBKDF2 迭代次数、相同的 AES-256-CBC 模式。密钥由 `sha256("ICSv2:" + stuid + ":" + uispsw)` 派生。
+本 Fork 的持久化数据库使用独立 `DB_ENCRYPTION_KEY`，避免数据库加密强度与 UIS
+密码绑定。未配置该 Secret 时仅保留旧版 UIS 派生方式作为兼容回退；新的个人部署
+必须配置独立密钥。由于浏览器前端没有接收该独立密钥的安全方案，本 Fork 不部署它。
 
 分片的动机是增量传输。数据库约 20MB，通过 GitHub API 完整拉取会显著增加前端加载时间。按课程分组切割为 ~10MB 的 shard，每个独立加密。前端使用 git blob SHA 作为缓存键存储于 IndexedDB，未变化的 shard 自动跳过网络下载、解密、解压。
 

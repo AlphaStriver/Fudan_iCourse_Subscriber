@@ -151,7 +151,7 @@ class Summarizer:
                     return (result, model_id)
                 except Exception as e:
                     print(f"[Summarizer] {model_id} failed: "
-                          f"{type(e).__name__}: {e}")
+                          f"{type(e).__name__}")
                     errors.append(f"{model_id}: {e}")
 
         raise RuntimeError(

@@ -3,10 +3,6 @@ name: Export Course Summaries
 on:
   workflow_dispatch:
     inputs:
-      course_id:
-        description: "Course ID(s) to export, comma-separated (e.g. 30004 or 30004,30005)"
-        required: true
-        type: string
       export_type:
         description: "Choose export type,if use HTML email,there will be no attachment, just the email body."
         type: choice
@@ -15,11 +11,6 @@ on:
           - PDF
           - Markdown
         default: 'HTML'
-      sub_ids:
-        description: "Optional comma-separated lecture sub_ids to filter (default: all summarized lectures)"
-        required: false
-        type: string
-        default: ""
 
 permissions:
   contents: read
@@ -88,6 +79,7 @@ jobs:
         env:
           STUID: ${{ secrets.STUID }}
           UISPSW: ${{ secrets.UISPSW }}
+          DB_ENCRYPTION_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: |
@@ -97,7 +89,11 @@ jobs:
             exit 0
           fi
 
-          NEW_KEY=$(printf '%s' "ICSv2:${STUID}:${UISPSW}" | sha256sum | cut -d' ' -f1)
+          if [ -n "$DB_ENCRYPTION_KEY" ]; then
+            NEW_KEY="$DB_ENCRYPTION_KEY"
+          else
+            NEW_KEY=$(printf '%s' "ICSv2:${STUID}:${UISPSW}" | sha256sum | cut -d' ' -f1)
+          fi
           LEGACY_KEY="${STUID}${UISPSW}${DASHSCOPE_API_KEY}${SMTP_PASSWORD}"
 
           decrypt_blob() {
@@ -126,8 +122,10 @@ jobs:
           SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
-          EXPORT_COURSE_ID: ${{ inputs.course_id }}
-          EXPORT_SUB_IDS: ${{ inputs.sub_ids }}
+          # Manual text inputs are public run metadata. By default export the
+          # subscribed courses; optional lecture filtering uses a secret too.
+          EXPORT_COURSE_ID: ${{ secrets.EXPORT_COURSE_IDS || secrets.COURSE_IDS }}
+          EXPORT_SUB_IDS: ${{ secrets.EXPORT_SUB_IDS }}
         run: |
           case "${{ inputs.export_type }}" in
             "HTML")

@@ -218,8 +218,7 @@ class LectureRunner:
                     return False
             except Exception as e:
                 self._reporter.info(
-                    f"    [Official transcript] probe for {sub_id} failed: "
-                    f"{type(e).__name__}: {e}"
+                    f"    [Official transcript] probe failed: {type(e).__name__}"
                 )
         return True
 
@@ -290,7 +289,7 @@ class LectureRunner:
             except Exception as e:
                 self._reporter.info(
                     f"    [Official transcript] unavailable, falling back "
-                    f"to ASR: {type(e).__name__}: {e}"
+                    f"to ASR: {type(e).__name__}"
                 )
 
         # Pull the audio handle.  ``schedule`` is idempotent — usually the
@@ -301,7 +300,7 @@ class LectureRunner:
         try:
             handle = downloader.get(sub_id, timeout=120)
         except TimeoutError as e:
-            self._reporter.info(f"    [SKIP] {e}")
+            self._reporter.info("    [SKIP] Audio download timed out.")
             self._db.update_error(sub_id, "transcribe", str(e))
             return None, None
         if handle is None:
@@ -322,7 +321,7 @@ class LectureRunner:
                 handle.path, handle.process, handle.stderr_chunks,
             )
         except NoAudioStreamError as e:
-            self._reporter.info(f"    [SKIP] Video-only (no audio stream): {e}")
+            self._reporter.info("    [SKIP] Video-only (no audio stream).")
             self._db.update_error(sub_id, "transcribe", str(e))
             self._db.mark_processed(sub_id)
             self._release_audio(sub_id)
@@ -333,14 +332,14 @@ class LectureRunner:
             # short-circuit the retry — just record the error so the
             # lecture is retried up to max_errors times.
             self._reporter.info(
-                f"    [SKIP] Incomplete audio, will retry next run: {e}"
+                "    [SKIP] Incomplete audio, will retry next run."
             )
             self._db.update_error(sub_id, "transcribe", str(e))
             self._release_audio(sub_id)
             return None, None
         except Exception as e:
             self._reporter.info(
-                f"    [FAIL] Transcription error: {type(e).__name__}: {e}"
+                f"    [FAIL] Transcription error: {type(e).__name__}"
             )
             self._db.update_error(sub_id, "transcribe", str(e))
             self._release_audio(sub_id)
@@ -371,7 +370,7 @@ class LectureRunner:
             return summary
         except Exception as e:
             self._reporter.info(
-                f"    [FAIL] Summarization error: {type(e).__name__}: {e}"
+                f"    [FAIL] Summarization error: {type(e).__name__}"
             )
             self._db.update_error(sub_id, "summarize", str(e))
             raise
@@ -381,7 +380,6 @@ class LectureRunner:
             self._scheduler.audio_downloader.release(sub_id)
         except Exception as e:
             self._reporter.info(
-                f"    [WARN] audio release failed: {type(e).__name__}: {e}"
+                f"    [WARN] audio release failed: {type(e).__name__}"
             )
-
 
