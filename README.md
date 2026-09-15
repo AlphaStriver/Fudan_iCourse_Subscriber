@@ -1,8 +1,8 @@
 # iCourse Subscriber V2
 
 > [!IMPORTANT]
-> 本 Fork 仅对个人信息保护做了加固：公开 Actions 日志和手动参数脱敏，并使用独立
-> `DB_ENCRYPTION_KEY`。课程处理逻辑保持上游行为。部署前请先阅读
+> 本 Fork 对个人信息保护做了加固，并支持私密课次白名单、按课程分别发信和
+> Markdown 附件。课程获取及录播开放时间处理保持上游行为。部署前请先阅读
 > [PERSONAL_DEPLOYMENT.md](PERSONAL_DEPLOYMENT.md)。
 
 自动监控复旦大学 iCourse 智慧教学平台的课程更新，对新课次的录播视频进行**语音转文字 + PPT OCR + AI 摘要**，并通过邮件推送到你的邮箱。
@@ -20,10 +20,12 @@
 
 1. 登录你的复旦 iCourse 账号（通过 WebVPN）
 2. 检查这两门课是否有新的录播视频
-3. 如果有：提取音频 → 语音识别 → 提取 PPT 图片 → OCR 转写 → AI 生成课程笔记
-4. 将所有新课次的笔记汇总成**一封邮件**发送给你
+3. 如果有：优先使用完整的官方字幕，否则语音识别 → 提取 PPT 图片 → OCR 转写 → AI 生成课程笔记
+4. 每门课程单独发送一封邮件，并附带该课程的 Markdown 笔记
 
-邮件包含专业排版的 Markdown 渲染内容（含 LaTeX 公式渲染）。如果老师提到了作业、考试、签到、组队等重要课程事项，会在笔记开头醒目标注。
+邮件正文包含专业排版的 Markdown 渲染内容（含 LaTeX 公式渲染），并附带可归档的
+`.md` 文件。如果老师提到了作业、考试、签到、组队等重要课程事项，会在笔记开头
+醒目标注。
 
 
 ## 快速部署（5 分钟）
@@ -41,6 +43,7 @@
 | `STUID` | ✅ | 复旦学号 | `22307110000` |
 | `UISPSW` | ✅ | UIS 统一身份认证密码 | `your_password` |
 | `COURSE_IDS` | ✅ | 要监控的课程 ID，多个用英文逗号分隔 | `35472,30251` |
+| `COURSE_SESSION_RULES` | ⬜ | 私密课次白名单；未列出的课程处理全部课次 | `35472=周一第1-2节|周三第6-8节` |
 | `DB_ENCRYPTION_KEY` | ✅ | 独立数据库密钥；用 `openssl rand -hex 32` 生成 | `64位随机十六进制字符串` |
 | `DASHSCOPE_API_KEY` | ⬜ | ModelScope 平台 API Key | `ms-xxxxxxxx` |
 | `DEEPSEEK_API_KEY` | ⬜ | DeepSeek API Key（推荐） | `sk-xxxxxxxx` |

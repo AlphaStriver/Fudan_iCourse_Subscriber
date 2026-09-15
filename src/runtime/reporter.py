@@ -305,6 +305,11 @@ class Reporter:
             print(f"[Email] Including {n} previously unsent lecture(s).",
                   flush=True)
 
+    def course_filter_skip(self, n: int):
+        with self._lock:
+            print(f"  Schedule allowlist skipped {n} playable lecture(s).",
+                  flush=True)
+
     def info(self, msg: str):
         """Generic info line — escape hatch for one-off messages."""
         with self._lock:
