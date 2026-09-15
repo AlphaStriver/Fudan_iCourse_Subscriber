@@ -7,7 +7,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: db-reset
+  group: icourse-data-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
@@ -34,7 +34,8 @@ jobs:
           UISPSW: ${{ secrets.UISPSW }}
           DB_ENCRYPTION_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
         run: |
-          git fetch origin data --depth=1
+          git fetch --depth=1 origin "+refs/heads/data:refs/remotes/origin/data" \
+            || { echo "::error::Could not fetch the existing data branch."; exit 1; }
           mkdir -p data/sharded/shards
           if git cat-file -e origin/data:data/icourse-index.enc 2>/dev/null; then
             git show origin/data:data/icourse-index.enc > data/sharded/icourse-index.enc
@@ -43,7 +44,10 @@ jobs:
               base=$(basename "$path")
               git show "origin/data:$path" > "data/sharded/shards/$base"
             done
-            python scripts/db_shard.py reassemble data/sharded data/icourse.db
+            rm -f data/icourse.db.reassembled
+            python scripts/db_shard.py reassemble data/sharded data/icourse.db.reassembled
+            python scripts/validate_db.py data/icourse.db.reassembled
+            mv data/icourse.db.reassembled data/icourse.db
           else
             echo "::error::No sharded database found on data branch."
             exit 1
@@ -97,6 +101,7 @@ jobs:
           DB_ENCRYPTION_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          python scripts/validate_db.py data/icourse.db
           # Shard into a fresh directory — data/sharded still holds the
           # fetched pre-delete shard files, and a deleted course's shard
           # must not survive into the push.
@@ -104,20 +109,26 @@ jobs:
           mkdir -p data/sharded_out
           python scripts/db_shard.py shard data/icourse.db data/sharded_out
 
-          # data/ is gitignored in the source tree and the data branch has
-          # unrelated history, so stage to a clean tree and force-push —
-          # the same pattern check.yml / single_run.yml use.
+          # Preserve data-branch history so an accidental deletion remains
+          # recoverable. Shared workflow concurrency prevents write races.
           rm -rf /tmp/db_deploy
-          mkdir -p /tmp/db_deploy/data/shards
-          cp data/sharded_out/icourse-index.enc /tmp/db_deploy/data/
-          cp data/sharded_out/shards/*.db.gz.enc /tmp/db_deploy/data/shards/
+          mkdir -p /tmp/db_deploy
           cd /tmp/db_deploy
 
           git init -q
-          git checkout -q -b data
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+          git fetch -q --depth=1 origin data
+          git checkout -q -b data FETCH_HEAD
+          rm -rf data
+          mkdir -p data/shards
+          cp "$GITHUB_WORKSPACE/data/sharded_out/icourse-index.enc" data/
+          cp "$GITHUB_WORKSPACE"/data/sharded_out/shards/*.db.gz.enc data/shards/
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/
+          git add -A data/
+          if git diff --cached --quiet; then
+            echo "No encrypted database changes to publish."
+            exit 0
+          fi
           git commit -q -m "chore: delete selected course data"
-          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
-          git push --force origin data
+          git push origin data

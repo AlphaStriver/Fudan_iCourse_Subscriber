@@ -20,7 +20,7 @@
 
 1. 登录你的复旦 iCourse 账号（通过 WebVPN）
 2. 检查这两门课是否有新的录播视频
-3. 如果有：优先使用完整的官方字幕，否则语音识别 → 提取 PPT 图片 → OCR 转写 → AI 生成课程笔记
+3. 如果有：优先使用完整的官方字幕；大段缺失时仅对缺口运行本地 ASR，字幕不可用时再完整 ASR → 提取 PPT 图片 → OCR 转写 → AI 生成课程笔记
 4. 每门课程单独发送一封邮件，并附带该课程的 Markdown 笔记
 
 邮件正文包含专业排版的 Markdown 渲染内容（含 LaTeX 公式渲染），并附带可归档的
@@ -82,7 +82,8 @@
 ### 第 6 步：运行
 
 - **自动运行**：默认每天 19:36（北京时间）自动执行
-- **手动触发**：进入仓库 → Actions → **iCourse Check** → Run workflow
+- **手动触发**：进入仓库 → Actions → **iCourse Check** → Run workflow。`Single Run`
+  也默认优先使用官方字幕。
 
 首次运行会处理所有已有录播，后续只处理新增课次。详细的隐私配置步骤见
 [个人部署说明](PERSONAL_DEPLOYMENT.md)。
@@ -221,7 +222,10 @@ GitHub Actions 每次在全新容器中运行，无法依赖本地文件系统�
 
 分片的动机是增量传输。数据库约 20MB，通过 GitHub API 完整拉取会显著增加前端加载时间。按课程分组切割为 ~10MB 的 shard，每个独立加密。前端使用 git blob SHA 作为缓存键存储于 IndexedDB，未变化的 shard 自动跳过网络下载、解密、解压。
 
-并发合并策略：两个 workflow 可能并行执行并同时写入数据库。`merge_db.py` 采用 field-level COALESCE——非空覆盖空、版本号取 MAX、错误字段在成功处理后清零。此策略是 CRDT（Conflict-Free Replicated Data Type）的简化版本，不能解决所有冲突（例如两个 workflow 对同一字段的并发写入），但在实际场景中，同一 lecture 不会被两个 workflow 同时处理，因此冲突概率足够低。
+并发保护：所有会写入 `data` 分支的 workflow 共用同一 concurrency group，按顺序
+执行。发布前重新读取远端并由 `merge_db.py` 做 field-level COALESCE 合并，随后执行
+SQLite 完整性检查；最终使用普通 fast-forward push 保留历史。如果远端在发布窗口内
+发生意外变化，推送会安全失败而不会强制覆盖。
 
 Schema 迁移：新增列时，旧的 shard 与新的 schema 之间存在列数不匹配的兼容性问题。`_migrate_shard_schema()` 在 INSERT 之前对每个 attached shard 执行 PRAGMA table_info 差集检查并通过 ALTER TABLE ADD COLUMN 补齐，将 schema 迁移与 shard 管理解耦。
 

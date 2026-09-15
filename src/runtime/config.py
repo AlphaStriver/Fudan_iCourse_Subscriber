@@ -166,7 +166,8 @@ VIDEO_DOWNLOAD_CONCURRENCY = int(
     os.environ.get("VIDEO_DOWNLOAD_CONCURRENCY", "2")
 )
 
-# 是否优先使用 iCourse 官方字幕（跳过 ASR 转录）。默认关闭。
+# 是否优先使用 iCourse 官方字幕（不完整时回退本地 ASR）。运行时默认关闭；
+# check.yml 与 single_run.yml 均显式开启/默认开启。
 USE_OFFICIAL_TRANSCRIPT = (
     os.environ.get("USE_OFFICIAL_TRANSCRIPT", "").strip().lower()
     in ("1", "true", "yes")

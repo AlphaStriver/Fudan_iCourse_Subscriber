@@ -282,7 +282,7 @@ document.addEventListener("alpine:init", () => {
     _subsFilterTimer: null, _deptFilterTimer: null,
     subsSaving: false, subsError: "",
     singleRunTriggering: false,
-    singleRunUseOfficial: false,
+    singleRunUseOfficial: true,
     /* Per-browser pinned-courses set, lazily synced to localStorage. */
     starred: _loadStarred(),
 
