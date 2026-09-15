@@ -173,6 +173,7 @@ jobs:
           # Course IDs are intentionally read from a secret. workflow_dispatch
           # text inputs are visible in the run metadata of a public repository.
           COURSE_IDS: ${{ secrets.COURSE_IDS }}
+          COURSE_SESSION_RULES: ${{ secrets.COURSE_SESSION_RULES }}
           USE_OFFICIAL_TRANSCRIPT: ${{ inputs.use_official_transcript && '1' || '' }}
           SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}

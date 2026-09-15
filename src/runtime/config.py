@@ -1,5 +1,7 @@
 import os
 
+from src.runtime.session_rules import parse_course_session_rules
+
 STUDENT_ID = os.environ.get("StuId", "")
 PASSWORD = os.environ.get("UISPsw", "")
 
@@ -176,6 +178,13 @@ COURSE_IDS = [
     for c in os.environ.get("COURSE_IDS", "").split(",")
     if c.strip()
 ]
+
+# Optional private per-course schedule allowlist.  Example secret value:
+# 12345=周一第1-2节|周三第6-8节
+# Courses omitted from the rules keep all playable lectures.
+COURSE_SESSION_RULES = parse_course_session_rules(
+    os.environ.get("COURSE_SESSION_RULES", "")
+)
 
 # 学期级课程目录爬取（已弃用 — main.py 现在自动发现所有学期）。
 # 保留此变量仅用于兼容老部署环境，新部署无需设置。

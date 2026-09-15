@@ -15,8 +15,10 @@ Anything more interesting belongs in one of ``src/*`` modules.
 
 import sys
 import time
+from collections import OrderedDict
 
 from src.runtime import config
+from src.runtime.session_rules import lecture_is_selected
 from src.data.database import Database
 from src.api.emailer import Emailer
 from src.api.icourse import ICourseClient
@@ -112,18 +114,35 @@ def _enumerate_lectures(client: ICourseClient, db: Database,
                     reporter.course_dedup_skip(title, lec["sub_id"])
             lectures = deduped
 
+            selected_lectures = []
+            filtered_count = 0
+            for lecture in lectures:
+                if not lecture.get("has_playback"):
+                    continue
+                if lecture_is_selected(
+                    course_id, lecture, config.COURSE_SESSION_RULES
+                ):
+                    selected_lectures.append(lecture)
+                else:
+                    filtered_count += 1
+            if filtered_count:
+                reporter.course_filter_skip(filtered_count)
+
             known_processed = db.get_processed_sub_ids(course_id)
             new_lectures = [
-                lec for lec in lectures
-                if lec.get("has_playback")
-                and str(lec["sub_id"]) not in known_processed
+                lec for lec in selected_lectures
+                if str(lec["sub_id"]) not in known_processed
             ]
             unprocessed = db.get_unprocessed_lectures(course_id)
             new_ids = {str(lec["sub_id"]) for lec in new_lectures}
             retry_only = [
                 {"sub_id": u["sub_id"], "sub_title": u["sub_title"],
                  "date": u["date"]}
-                for u in unprocessed if u["sub_id"] not in new_ids
+                for u in unprocessed
+                if u["sub_id"] not in new_ids
+                and lecture_is_selected(
+                    course_id, u, config.COURSE_SESSION_RULES
+                )
             ]
             new_lectures.extend(retry_only)
             reporter.course_new_count(len(new_lectures))
@@ -180,6 +199,7 @@ def _drive_lectures(client: ICourseClient, db: Database,
             if summary:
                 email_items.append({
                     "sub_id": sub_id,
+                    "course_id": course_id,
                     "course_title": course_title,
                     "sub_title": lecture.get("sub_title", sub_id),
                     "date": lecture.get("date", ""),
@@ -202,27 +222,47 @@ def _send_email(emailer: Emailer | None, db: Database, reporter: Reporter,
     unsent = db.get_unsent_lectures()
     if unsent:
         seen_sub_ids = {item["sub_id"] for item in email_items}
+        recovered_count = 0
         for row in unsent:
-            if row["sub_id"] not in seen_sub_ids:
+            if (
+                row["sub_id"] not in seen_sub_ids
+                and lecture_is_selected(
+                    row["course_id"], row, config.COURSE_SESSION_RULES
+                )
+            ):
                 email_items.append({
                     "sub_id": row["sub_id"],
+                    "course_id": row["course_id"],
                     "course_title": row["course_title"],
                     "sub_title": row["sub_title"],
                     "date": row["date"],
                     "summary": row["summary"],
                 })
-        reporter.email_recovered_unsent(len(unsent))
+                recovered_count += 1
+        if recovered_count:
+            reporter.email_recovered_unsent(recovered_count)
 
     if not (emailer and email_items):
         return
-    try:
-        reporter.email_summary(len(email_items))
-        if emailer.send(email_items):
-            db.mark_emailed_batch([item["sub_id"] for item in email_items])
-        else:
-            reporter.email_failed()
-    except Exception as e:
-        reporter.info(f"[Email] Failed to send ({type(e).__name__}).")
+
+    # Send one message per course.  Use course_id as the grouping key so two
+    # different courses with the same display title are never combined.
+    courses: OrderedDict[str, list[dict]] = OrderedDict()
+    for item in email_items:
+        course_key = str(item.get("course_id") or item["course_title"])
+        courses.setdefault(course_key, []).append(item)
+
+    for course_items in courses.values():
+        reporter.email_summary(len(course_items))
+        try:
+            if emailer.send(course_items):
+                db.mark_emailed_batch(
+                    [item["sub_id"] for item in course_items]
+                )
+            else:
+                reporter.email_failed()
+        except Exception as e:
+            reporter.info(f"[Email] Failed to send ({type(e).__name__}).")
 
 
 def _crawl_semester_catalog(client: ICourseClient, db: Database,
