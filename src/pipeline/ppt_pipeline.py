@@ -126,7 +126,7 @@ class PPTAsyncHandle:
             try:
                 _page_num, status = fut.result()
             except Exception as e:
-                print(f"      OCR worker exception: {type(e).__name__}: {e}",
+                print(f"      OCR worker exception: {type(e).__name__}",
                       flush=True)
                 failed += 1
                 continue
@@ -254,8 +254,7 @@ class PPTPipeline:
         except Exception as e:
             if self._reporter:
                 self._reporter.info(
-                    f"    [Prefetch OCR] {sub_id} failed: "
-                    f"{type(e).__name__}: {e}"
+                    f"    [Prefetch OCR] failed: {type(e).__name__}"
                 )
 
     # ── Shared stages 1-3 ───────────────────────────────────────────────
@@ -367,7 +366,7 @@ class PPTPipeline:
             text = ocr_image_text(image_bytes)
         except Exception as e:
             print(f"      page {page_num}: OCR error "
-                  f"{type(e).__name__}: {e}", flush=True)
+                  f"{type(e).__name__}", flush=True)
             self._db.update_ppt_page(sub_id, page_num, None, "failed")
             if self._reporter:
                 self._reporter.ocr_progress_tick(sub_id)

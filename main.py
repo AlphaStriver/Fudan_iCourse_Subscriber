@@ -13,8 +13,8 @@ AudioDownloader.  This file does only orchestration:
 Anything more interesting belongs in one of ``src/*`` modules.
 """
 
+import sys
 import time
-import traceback
 
 from src.runtime import config
 from src.data.database import Database
@@ -48,7 +48,7 @@ def login_with_retry(max_attempts: int = 10) -> WebVPNSession:
             return vpn
         except Exception as e:
             if attempt < max_attempts - 1:
-                print(f"  Failed: {type(e).__name__}: {e}; retrying...")
+                print(f"  Failed: {type(e).__name__}; retrying...")
                 time.sleep(5)
             else:
                 raise
@@ -138,9 +138,9 @@ def _enumerate_lectures(client: ICourseClient, db: Database,
                     lecture.get("date", ""),
                 )
                 out.append((course_id, course_title, lecture))
-        except Exception:
+        except Exception as e:
             reporter.course_enumeration_error(course_id)
-            traceback.print_exc()
+            reporter.info(f"  Error type: {type(e).__name__}")
     return out
 
 
@@ -185,9 +185,9 @@ def _drive_lectures(client: ICourseClient, db: Database,
                     "date": lecture.get("date", ""),
                     "summary": summary,
                 })
-        except Exception:
+        except Exception as e:
             reporter.lecture_error(sub_id)
-            traceback.print_exc()
+            reporter.info(f"    Error type: {type(e).__name__}")
         finally:
             # Belt-and-braces: drop any lingering prefetch entry for this
             # lecture so we don't leak bytes if the runner crashed before
@@ -221,9 +221,8 @@ def _send_email(emailer: Emailer | None, db: Database, reporter: Reporter,
             db.mark_emailed_batch([item["sub_id"] for item in email_items])
         else:
             reporter.email_failed()
-    except Exception:
-        reporter.info("[Email] Failed to send:")
-        traceback.print_exc()
+    except Exception as e:
+        reporter.info(f"[Email] Failed to send ({type(e).__name__}).")
 
 
 def _crawl_semester_catalog(client: ICourseClient, db: Database,
@@ -340,4 +339,10 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    try:
+        run()
+    except Exception as exc:
+        # Actions logs are public in a public fork. Exception messages and
+        # tracebacks may contain signed URLs or course metadata.
+        print(f"[Fatal] Run failed: {type(exc).__name__}", flush=True)
+        sys.exit(1)

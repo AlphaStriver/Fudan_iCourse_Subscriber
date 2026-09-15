@@ -2,16 +2,6 @@ name: Delete Course Data
 
 on:
   workflow_dispatch:
-    inputs:
-      course_ids:
-        description: "Course ID(s) to delete, comma-separated (e.g. 30004 or 30004,30005)"
-        required: true
-        type: string
-      sub_ids:
-        description: "Optional lecture sub_id(s) to delete within the course (comma-separated). If omitted, deletes the entire course."
-        required: false
-        type: string
-        default: ""
 
 permissions:
   contents: write
@@ -42,6 +32,7 @@ jobs:
         env:
           STUID: ${{ secrets.STUID }}
           UISPSW: ${{ secrets.UISPSW }}
+          DB_ENCRYPTION_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
         run: |
           git fetch origin data --depth=1
           mkdir -p data/sharded/shards
@@ -59,33 +50,37 @@ jobs:
           fi
 
       - name: Delete lecture(s) or course(s)
+        env:
+          # Manual text inputs are public run metadata. Set these only as
+          # Actions secrets immediately before a deletion run.
+          COURSE_IDS_INPUT: ${{ secrets.DELETE_COURSE_IDS }}
+          SUB_IDS_INPUT: ${{ secrets.DELETE_SUB_IDS }}
         run: |
-          SUB_IDS="${{ inputs.sub_ids }}"
-          IFS=',' read -ra CIDS <<< "${{ inputs.course_ids }}"
+          SUB_IDS="$SUB_IDS_INPUT"
+          IFS=',' read -ra CIDS <<< "$COURSE_IDS_INPUT"
           for cid in "${CIDS[@]}"; do
             cid=$(echo "$cid" | xargs)
             if [ -n "$SUB_IDS" ]; then
-              echo "Deleting specific lecture(s) from course $cid..."
+              echo "Deleting selected lecture data..."
               IFS=',' read -ra SIDS <<< "$SUB_IDS"
               for sid in "${SIDS[@]}"; do
                 sid=$(echo "$sid" | xargs)
-                echo "  Deleting lecture $sid..."
                 sqlite3 data/icourse.db "DELETE FROM ppt_pages WHERE sub_id='$sid'"
                 sqlite3 data/icourse.db "DELETE FROM lectures WHERE sub_id='$sid'"
               done
               remaining=$(sqlite3 data/icourse.db "SELECT COUNT(*) FROM lectures WHERE course_id='$cid'")
-              echo "  $remaining lecture(s) remaining for course $cid"
+              echo "  $remaining lecture(s) remaining for selected course"
               if [ "$remaining" -eq 0 ]; then
                 sqlite3 data/icourse.db "DELETE FROM courses WHERE course_id='$cid'"
-                echo "  Course $cid removed (no lectures left)"
+                echo "  Empty course record removed"
               fi
             else
-              echo "Deleting entire course $cid..."
+              echo "Deleting selected course data..."
               count=$(sqlite3 data/icourse.db "SELECT COUNT(*) FROM lectures WHERE course_id='$cid'")
               sqlite3 data/icourse.db "DELETE FROM ppt_pages WHERE sub_id IN (SELECT sub_id FROM lectures WHERE course_id='$cid')"
               sqlite3 data/icourse.db "DELETE FROM lectures WHERE course_id='$cid'"
               sqlite3 data/icourse.db "DELETE FROM courses WHERE course_id='$cid'"
-              echo "  Removed $count lecture(s) for course $cid"
+              echo "  Removed $count lecture(s) from selected course"
             fi
           done
 
@@ -99,6 +94,7 @@ jobs:
         env:
           STUID: ${{ secrets.STUID }}
           UISPSW: ${{ secrets.UISPSW }}
+          DB_ENCRYPTION_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Shard into a fresh directory — data/sharded still holds the
@@ -122,6 +118,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/
-          git commit -q -m "chore: delete ${{ inputs.sub_ids != '' && 'lecture(s)' || 'course(s)' }} ${{ inputs.sub_ids || inputs.course_ids }}"
+          git commit -q -m "chore: delete selected course data"
           git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
           git push --force origin data

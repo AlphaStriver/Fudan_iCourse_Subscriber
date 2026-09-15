@@ -96,9 +96,11 @@ LAYOUT under ``output_dir``
     shards/shard-hot-NNNN.db.gz.enc  — hot bin (≤10 courses each)
     shards/shard-cold-NNNN.db.gz.enc — cold bin (≤30 courses each)
 
-Trust model: every shard and the index are encrypted with the v2 password
-(sha256("ICSv2:" + stuid + ":" + uispsw)).  The data branch is public; the
-file names and shard count leak, but no row content does.
+Trust model: every shard and the index are encrypted with the storage password
+provided by ``scripts/db_shard.py``. Personal deployments use a dedicated
+``DB_ENCRYPTION_KEY``; the UIS-derived v2 password remains a compatibility
+fallback only. The data branch is public; file names and shard count leak, but
+row content is encrypted.
 """
 
 from __future__ import annotations

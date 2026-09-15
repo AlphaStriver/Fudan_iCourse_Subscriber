@@ -18,6 +18,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate database encryption key
+        env:
+          DB_ENCRYPTION_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
+        run: |
+          if [ "${#DB_ENCRYPTION_KEY}" -lt 32 ]; then
+            echo "::error::DB_ENCRYPTION_KEY must contain at least 32 characters"
+            exit 2
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -103,6 +112,7 @@ jobs:
         env:
           STUID: ${{ secrets.STUID }}
           UISPSW: ${{ secrets.UISPSW }}
+          DB_ENCRYPTION_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: |
@@ -114,7 +124,11 @@ jobs:
           fi
 
           # Legacy single-file path (one-time migration on first sharded run).
-          NEW_KEY=$(printf '%s' "ICSv2:${STUID}:${UISPSW}" | sha256sum | cut -d' ' -f1)
+          if [ -n "$DB_ENCRYPTION_KEY" ]; then
+            NEW_KEY="$DB_ENCRYPTION_KEY"
+          else
+            NEW_KEY=$(printf '%s' "ICSv2:${STUID}:${UISPSW}" | sha256sum | cut -d' ' -f1)
+          fi
           LEGACY_KEY="${STUID}${UISPSW}${DASHSCOPE_API_KEY}${SMTP_PASSWORD}"
 
           decrypt_blob() {
@@ -186,6 +200,7 @@ jobs:
         env:
           STUID: ${{ secrets.STUID }}
           UISPSW: ${{ secrets.UISPSW }}
+          DB_ENCRYPTION_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
           COURSE_IDS: ${{ secrets.COURSE_IDS }}
           # Persisted by the sharder into meta('subscribed_course_ids')
           # so single_run.yml / delete_course.yml (which run with a

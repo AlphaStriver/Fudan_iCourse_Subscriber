@@ -91,15 +91,13 @@ class Reporter:
                       total: int, playback: int):
         with self._lock:
             print(f"\n{'─' * 50}")
-            print(f"[Course] {course_id}")
-            print(f"  Title: {title} (Teacher: {teacher})")
+            print("[Course] Configured course loaded (details redacted)")
             print(f"  Total lectures: {total} ({playback} with playback)",
                   flush=True)
 
     def course_dedup_skip(self, sub_title: str, sub_id):
         with self._lock:
-            print(f"  [Dedup] Skipping duplicate: {sub_title} "
-                  f"(sub_id={sub_id})", flush=True)
+            print("  [Dedup] Skipping duplicate lecture", flush=True)
 
     def course_new_count(self, n: int):
         with self._lock:
@@ -109,16 +107,14 @@ class Reporter:
 
     def course_enumeration_error(self, course_id: str):
         with self._lock:
-            print(f"  ERROR enumerating course {course_id}:", flush=True)
+            print("  ERROR enumerating configured course", flush=True)
 
     # ── Lecture-level ────────────────────────────────────────────────────
 
     def lecture_start(self, course_title: str, sub_title: str, date: str):
-        """Lecture header — explicitly includes course_title so users can
-        correlate a Phase-2 'Processing' line back to its course even after
-        the Phase-1 enumeration scrolled away."""
+        """Emit a public-safe lecture header without course metadata."""
         with self._lock:
-            print(f"\n  -- [{course_title}] {sub_title} ({date})")
+            print("\n  -- Processing lecture (details redacted)")
             print(f"    [Time] Start: {time.strftime('%Y-%m-%d %H:%M:%S')}",
                   flush=True)
 
@@ -134,12 +130,12 @@ class Reporter:
     def lecture_done(self, course_title: str, sub_title: str, elapsed: float):
         with self._lock:
             print(f"    [Time] Done at {time.strftime('%H:%M:%S')}: "
-                  f"[{course_title}] {sub_title} (total {elapsed:.0f}s)",
+                  f"lecture complete (total {elapsed:.0f}s)",
                   flush=True)
 
     def lecture_error(self, sub_id: str):
         with self._lock:
-            print(f"    ERROR processing {sub_id}:", flush=True)
+            print("    ERROR processing lecture", flush=True)
 
     # ── PPT pipeline ─────────────────────────────────────────────────────
 
@@ -150,7 +146,7 @@ class Reporter:
 
     def ppt_list_failed(self, exc_type: str, msg: str):
         with self._lock:
-            print(f"    [WARN] PPT list fetch failed: {exc_type}: {msg}",
+            print(f"    [WARN] PPT list fetch failed: {exc_type}",
                   flush=True)
 
     def ppt_pipeline_summary(self, done: int, dedupped: int, invalid: int,
@@ -200,7 +196,7 @@ class Reporter:
         done, total, rate, _is_final = emit_payload
         bar = self._bar(done, total)
         _rm = _resource_meter("io")
-        print(f"    [Images {sub_id}] {bar} {done}/{total} "
+        print(f"    [Images] {bar} {done}/{total} "
               f"({rate:.1f} pic/s){_rm}", flush=True)
 
     def image_progress_abort(self, sub_id: str):
@@ -260,7 +256,7 @@ class Reporter:
         done, total, rate, _is_final = emit_payload
         bar = self._bar(done, total)
         _rm = _resource_meter("cpu")
-        print(f"    [OCR {sub_id}] {bar} {done}/{total} "
+        print(f"    [OCR] {bar} {done}/{total} "
               f"({rate:.2f} page/s){_rm}", flush=True)
 
     def ocr_progress_abort(self, sub_id: str):
@@ -278,19 +274,19 @@ class Reporter:
 
     def audio_prefetch_start(self, sub_id: str):
         with self._lock:
-            print(f"    [Prefetch] audio for {sub_id} starting...",
+            print("    [Prefetch] lecture audio starting...",
                   flush=True)
 
     def audio_prefetch_done(self, sub_id: str, elapsed: float, size_mb: float):
         with self._lock:
             rate = size_mb / max(elapsed, 0.001)
-            print(f"    [Prefetch] audio for {sub_id}: {size_mb:.1f} MB "
+            print(f"    [Prefetch] lecture audio: {size_mb:.1f} MB "
                   f"in {elapsed:.1f}s ({rate:.1f} MB/s)", flush=True)
 
     def audio_prefetch_failed(self, sub_id: str, exc: BaseException):
         with self._lock:
-            print(f"    [Prefetch] audio for {sub_id} failed: "
-                  f"{type(exc).__name__}: {exc}", flush=True)
+            print(f"    [Prefetch] lecture audio failed: "
+                  f"{type(exc).__name__}", flush=True)
 
     # ── Email / generic ──────────────────────────────────────────────────
 
@@ -333,6 +329,6 @@ class Reporter:
     def crawl_courses_failed(self, term: str, exc: BaseException):
         with self._lock:
             print(
-                f"[Crawl] Term {term} failed: "
-                f"{type(exc).__name__}: {exc}", flush=True,
+                f"[Crawl] Term {term} failed: {type(exc).__name__}",
+                flush=True,
             )

@@ -45,14 +45,14 @@ def ocr_image(image_bytes: bytes) -> list[OCRBlock]:
         import numpy as np
         arr = np.array(img)
     except Exception as e:
-        print(f"[OCR] image decode failed: {type(e).__name__}: {e}")
+        print(f"[OCR] image decode failed: {type(e).__name__}")
         return []
 
     engine = _get_engine()
     try:
         result, _elapsed = engine(arr)
     except Exception as e:
-        print(f"[OCR] engine call failed: {type(e).__name__}: {e}")
+        print(f"[OCR] engine call failed: {type(e).__name__}")
         return []
 
     if not result:

@@ -3,16 +3,11 @@ name: Single Run
 on:
   workflow_dispatch:
     inputs:
-      course_ids:
-        description: "Comma-separated course IDs to process (e.g. 30004,30005)"
-        required: true
-        type: string
       use_official_transcript:
         description: "Use official iCourse transcripts instead of ASR"
         required: false
         default: false
         type: boolean
-
 permissions:
   contents: write
 
@@ -23,6 +18,15 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Validate database encryption key
+        env:
+          DB_ENCRYPTION_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
+        run: |
+          if [ "${#DB_ENCRYPTION_KEY}" -lt 32 ]; then
+            echo "::error::DB_ENCRYPTION_KEY must contain at least 32 characters"
+            exit 2
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -100,6 +104,7 @@ jobs:
         env:
           STUID: ${{ secrets.STUID }}
           UISPSW: ${{ secrets.UISPSW }}
+          DB_ENCRYPTION_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: |
@@ -109,7 +114,11 @@ jobs:
             exit 0
           fi
 
-          NEW_KEY=$(printf '%s' "ICSv2:${STUID}:${UISPSW}" | sha256sum | cut -d' ' -f1)
+          if [ -n "$DB_ENCRYPTION_KEY" ]; then
+            NEW_KEY="$DB_ENCRYPTION_KEY"
+          else
+            NEW_KEY=$(printf '%s' "ICSv2:${STUID}:${UISPSW}" | sha256sum | cut -d' ' -f1)
+          fi
           LEGACY_KEY="${STUID}${UISPSW}${DASHSCOPE_API_KEY}${SMTP_PASSWORD}"
 
           decrypt_blob() {
@@ -161,7 +170,9 @@ jobs:
         env:
           StuId: ${{ secrets.STUID }}
           UISPsw: ${{ secrets.UISPSW }}
-          COURSE_IDS: ${{ inputs.course_ids }}
+          # Course IDs are intentionally read from a secret. workflow_dispatch
+          # text inputs are visible in the run metadata of a public repository.
+          COURSE_IDS: ${{ secrets.COURSE_IDS }}
           USE_OFFICIAL_TRANSCRIPT: ${{ inputs.use_official_transcript && '1' || '' }}
           SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
@@ -181,6 +192,7 @@ jobs:
         env:
           STUID: ${{ secrets.STUID }}
           UISPSW: ${{ secrets.UISPSW }}
+          DB_ENCRYPTION_KEY: ${{ secrets.DB_ENCRYPTION_KEY }}
           DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

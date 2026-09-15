@@ -105,8 +105,8 @@ class PrefetchCache:
                 img = fut.result()
             except Exception as e:
                 print(
-                    f"    [Prefetch {sub_id}] page {page_num} download "
-                    f"failed: {type(e).__name__}: {e}"
+                    f"    [Prefetch] page {page_num} download failed: "
+                    f"{type(e).__name__}"
                 )
                 img = None
             if img is not None:

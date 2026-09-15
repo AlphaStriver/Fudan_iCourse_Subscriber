@@ -5,7 +5,9 @@ Usage:
     python scripts/db_shard.py shard      <db_path>    <output_dir>
     python scripts/db_shard.py reassemble <input_dir>  <db_path>
 
-Reads the v2 password from STUID + UISPSW env vars. Both subcommands
+Reads the storage password from DB_ENCRYPTION_KEY.  For compatibility with
+older deployments, STUID + UISPSW is used only when the dedicated key is not
+configured.  Both subcommands
 operate on the layout produced by `src.sharder`:
     <dir>/icourse-index.enc
     <dir>/shards/shard-NNNN.db.gz.enc
@@ -29,10 +31,22 @@ from src.data.sharder import (
 
 
 def _password() -> str:
+    storage_key = os.environ.get("DB_ENCRYPTION_KEY", "").strip()
+    if storage_key:
+        if len(storage_key) < 32:
+            print(
+                "error: DB_ENCRYPTION_KEY must be at least 32 characters",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        return storage_key
     stuid = os.environ.get("STUID") or os.environ.get("StuId", "")
     uispsw = os.environ.get("UISPSW") or os.environ.get("UISPsw", "")
     if not stuid or not uispsw:
-        print("error: STUID and UISPSW env vars required", file=sys.stderr)
+        print(
+            "error: DB_ENCRYPTION_KEY or STUID + UISPSW env vars required",
+            file=sys.stderr,
+        )
         sys.exit(2)
     return derive_new_password(stuid, uispsw)
 
