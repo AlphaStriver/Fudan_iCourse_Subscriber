@@ -634,6 +634,98 @@ class Transcriber:
         finally:
             f.close()
 
+    def transcribe_tail_intervals(
+        self,
+        audio_path: str,
+        ffmpeg_proc: subprocess.Popen,
+        stderr_chunks: list[bytes],
+        intervals: list[tuple[float, float]],
+        expected_duration_s: float | None = None,
+        timeout: int = 7200,
+    ) -> tuple[str, list[dict]]:
+        """Transcribe selected time ranges from a fully downloaded PCM file.
+
+        Used to fill long holes in otherwise-useful official subtitles. The
+        full audio stream is still downloaded for reliable random access, but
+        ASR inference runs only over the missing ranges.
+        """
+        t0 = time.time()
+        while not os.path.exists(audio_path):
+            if ffmpeg_proc.poll() is not None:
+                raise RuntimeError("ffmpeg exited before creating interval audio")
+            if time.time() - t0 > 60:
+                raise TimeoutError("ffmpeg did not create interval audio in time")
+            time.sleep(0.1)
+
+        try:
+            ffmpeg_proc.wait(timeout=max(1, timeout - int(time.time() - t0)))
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError("audio download timed out before gap ASR") from exc
+
+        stderr_output = b"".join(stderr_chunks)
+        rc = ffmpeg_proc.returncode
+        if rc not in (0, -9, -15):
+            stderr_text = stderr_output.decode(errors="replace")
+            if "does not contain any stream" in stderr_text:
+                raise NoAudioStreamError("ffmpeg found no audio stream")
+            raise RuntimeError(f"ffmpeg exited with code {rc}")
+
+        actual_duration = os.path.getsize(audio_path) / BYTES_PER_SECOND
+        dur_match = re.search(
+            rb"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", stderr_output,
+        )
+        expected_duration = float(expected_duration_s or 0) or actual_duration
+        if not expected_duration_s and dur_match:
+            h, m, s = dur_match.groups()
+            expected_duration = int(h) * 3600 + int(m) * 60 + float(s)
+        if expected_duration > 0 and actual_duration / expected_duration < 0.9:
+            raise IncompleteAudioError(
+                "Downloaded audio is incomplete for gap ASR",
+                actual_duration=actual_duration,
+                expected_duration=expected_duration,
+            )
+
+        normalized: list[tuple[float, float]] = []
+        for start, end in sorted(intervals):
+            start = max(0.0, float(start))
+            end = min(actual_duration, float(end))
+            if end > start:
+                normalized.append((start, end))
+
+        all_segments: list[dict] = []
+        with open(audio_path, "rb") as audio:
+            for index, (start, end) in enumerate(normalized, start=1):
+                start_byte = int(start * BYTES_PER_SECOND)
+                start_byte -= start_byte % BYTES_PER_SAMPLE
+                remaining = max(0, int((end - start) * BYTES_PER_SECOND))
+                audio.seek(start_byte)
+
+                def read_fn(n: int) -> bytes:
+                    nonlocal remaining
+                    if remaining <= 0:
+                        return b""
+                    chunk = audio.read(min(n, remaining))
+                    remaining -= len(chunk)
+                    return chunk
+
+                _, local_segments = self._consume_pcm_stream(
+                    read_fn=read_fn,
+                    is_eof_fn=lambda: remaining <= 0,
+                    stderr_provider=lambda: b"",
+                    return_code_fn=lambda: 0,
+                    timeout=max(1, timeout - int(time.time() - t0)),
+                    label=f"subtitle gap {index}/{len(normalized)}",
+                )
+                offset_ms = int(start * 1000)
+                for seg in local_segments:
+                    shifted = dict(seg)
+                    shifted["start_ms"] = int(seg["start_ms"]) + offset_ms
+                    shifted["end_ms"] = int(seg["end_ms"]) + offset_ms
+                    all_segments.append(shifted)
+
+        transcript = " ".join(s["text"] for s in all_segments)
+        return transcript, all_segments
+
     # ── Public mode 2 — legacy URL streaming (fallback) ─────────────────
 
     def transcribe_url(self, url: str, timeout: int = 7200,

@@ -4,12 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       use_official_transcript:
-        description: "Use official iCourse transcripts instead of ASR"
+        description: "Prefer official iCourse transcripts; fall back to local ASR"
         required: false
-        default: false
+        default: true
         type: boolean
 permissions:
   contents: write
+
+concurrency:
+  group: icourse-data-${{ github.repository }}
+  cancel-in-progress: false
 
 jobs:
   run:
@@ -74,12 +78,21 @@ jobs:
           key: rapidocr-onnx-default-v1
 
       - name: Fetch database from data branch
+        id: db-source
         run: |
           mkdir -p data
-          git fetch --depth=1 origin "+refs/heads/data:refs/remotes/origin/data" 2>/dev/null \
-            || { echo "No data branch, starting fresh."; exit 0; }
+          remote_ref=$(git ls-remote --heads origin refs/heads/data) \
+            || { echo "::error::Could not inspect the data branch."; exit 1; }
+          if [ -z "$remote_ref" ]; then
+            echo "No data branch; this is a confirmed first run."
+            echo "state=fresh" >> "$GITHUB_OUTPUT"
+            touch .db-source-ok
+            exit 0
+          fi
+          git fetch --depth=1 origin "+refs/heads/data:refs/remotes/origin/data" \
+            || { echo "::error::Could not fetch the existing data branch."; exit 1; }
           git ls-tree origin/data --name-only data/ | grep -q . \
-            || { echo "No database found on data branch, starting fresh."; exit 0; }
+            || { echo "::error::Existing data branch contains no database."; exit 1; }
           if git cat-file -e origin/data:data/icourse-index.enc 2>/dev/null; then
             mkdir -p data/sharded/shards
             git show origin/data:data/icourse-index.enc > data/sharded/icourse-index.enc
@@ -96,10 +109,13 @@ jobs:
             git show origin/data:data/icourse.db.enc > data/icourse.db.enc
             echo "Loaded legacy uncompressed database."
           else
-            echo "No database found on data branch, starting fresh."
+            echo "::error::Existing data branch has an unknown database format."
+            exit 1
           fi
+          echo "state=existing" >> "$GITHUB_OUTPUT"
 
       - name: Decode database
+        id: db-decode
         if: hashFiles('data/sharded/icourse-index.enc', 'data/icourse.db.gz.enc', 'data/icourse.db.enc') != ''
         env:
           STUID: ${{ secrets.STUID }}
@@ -109,8 +125,12 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
         run: |
           if [ -f data/sharded/icourse-index.enc ]; then
-            python scripts/db_shard.py reassemble data/sharded data/icourse.db
+            rm -f data/icourse.db.reassembled
+            python scripts/db_shard.py reassemble data/sharded data/icourse.db.reassembled
+            python scripts/validate_db.py data/icourse.db.reassembled
+            mv data/icourse.db.reassembled data/icourse.db
             echo "Reassembled sharded database."
+            touch .db-source-ok
             exit 0
           fi
 
@@ -144,17 +164,21 @@ jobs:
               gzip -d data/icourse.db.gz
               echo "Legacy compressed DB decrypted ($VER)."
             else
-              echo "::warning::Decryption failed (both keys). Starting with fresh database."
+              echo "::error::Database decryption failed; refusing to replace existing data."
               rm -f data/icourse.db data/icourse.db.gz
+              exit 1
             fi
           elif [ -f data/icourse.db.enc ]; then
             if VER=$(decrypt_blob data/icourse.db.enc data/icourse.db); then
               echo "Legacy uncompressed DB decrypted ($VER)."
             else
-              echo "::warning::Decryption failed (both keys). Starting with fresh database."
+              echo "::error::Database decryption failed; refusing to replace existing data."
               rm -f data/icourse.db
+              exit 1
             fi
           fi
+          python scripts/validate_db.py data/icourse.db
+          touch .db-source-ok
 
       - name: Record database state
         id: db-before
@@ -198,10 +222,16 @@ jobs:
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          if [ ! -f .db-source-ok ]; then
+            echo "::error::Database source was not verified; refusing to publish."
+            exit 1
+          fi
           if [ ! -f data/icourse.db ]; then
             echo "No database file, skipping."
             exit 0
           fi
+
+          python scripts/validate_db.py data/icourse.db
 
           AFTER=$(md5sum data/icourse.db | cut -d' ' -f1)
           if [ "$AFTER" = "${{ steps.db-before.outputs.hash }}" ]; then
@@ -209,7 +239,12 @@ jobs:
             exit 0
           fi
 
-          git fetch origin data --depth=1 2>/dev/null || echo "No data branch yet."
+          remote_ref=$(git ls-remote --heads origin refs/heads/data) \
+            || { echo "::error::Could not inspect the data branch before publish."; exit 1; }
+          if [ -n "$remote_ref" ]; then
+            git fetch --depth=1 origin "+refs/heads/data:refs/remotes/origin/data" \
+              || { echo "::error::Could not refresh the data branch before publish."; exit 1; }
+          fi
           DEPLOY_DB=data/icourse.db
           if git rev-parse origin/data >/dev/null 2>&1 && \
              git cat-file -e origin/data:data/icourse-index.enc 2>/dev/null; then
@@ -227,21 +262,34 @@ jobs:
             DEPLOY_DB=data/remote.db
           fi
 
+          python scripts/validate_db.py "$DEPLOY_DB"
+
           rm -rf data/sharded_out
           mkdir -p data/sharded_out
           python scripts/db_shard.py shard "$DEPLOY_DB" data/sharded_out
 
           rm -rf /tmp/db_deploy
-          mkdir -p /tmp/db_deploy/data/shards
-          cp data/sharded_out/icourse-index.enc /tmp/db_deploy/data/
-          cp data/sharded_out/shards/*.db.gz.enc /tmp/db_deploy/data/shards/
+          mkdir -p /tmp/db_deploy
           cd /tmp/db_deploy
 
           git init -q
-          git checkout -q -b data
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+          if [ -n "$remote_ref" ]; then
+            git fetch -q --depth=1 origin data
+            git checkout -q -b data FETCH_HEAD
+          else
+            git checkout -q -b data
+          fi
+          rm -rf data
+          mkdir -p data/shards
+          cp "$GITHUB_WORKSPACE/data/sharded_out/icourse-index.enc" data/
+          cp "$GITHUB_WORKSPACE"/data/sharded_out/shards/*.db.gz.enc data/shards/
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/
+          git add -A data/
+          if git diff --cached --quiet; then
+            echo "Encrypted database unchanged after merge; nothing to publish."
+            exit 0
+          fi
           git commit -q -m "chore: update encrypted database (sharded v2)"
-          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
-          git push --force origin data
+          git push origin data

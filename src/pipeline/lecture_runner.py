@@ -44,6 +44,10 @@ from src.ai import bucketer
 from src.pipeline.ppt_pipeline import PPTPipeline
 from src.ai.transcriber import IncompleteAudioError, NoAudioStreamError
 from src.runtime import config
+from src.runtime.transcript_policy import (
+    assess_official_transcript,
+    merge_timed_segments,
+)
 
 if TYPE_CHECKING:
     from src.data.database import Database
@@ -196,10 +200,10 @@ class LectureRunner:
         # until a download slot frees.
         self._scheduler.prefetch_lecture(
             self._client, next_course, next_sub,
-            audio=self._needs_audio(next_sub),
+            audio=self._needs_audio(next_course, next_sub),
         )
 
-    def _needs_audio(self, sub_id: str) -> bool:
+    def _needs_audio(self, course_id: str, sub_id: str) -> bool:
         """False when transcription won't need the audio stream: a cached
         transcript exists, or the official transcript looks usable.  Keeps
         prefetching from spending a download slot (and a full lecture of
@@ -210,11 +214,12 @@ class LectureRunner:
         if config.USE_OFFICIAL_TRANSCRIPT:
             try:
                 segments = self._client.get_transcript_segments(sub_id)
+                if segments:
+                    self._official_cache[sub_id] = segments
                 # No tail hint at prefetch time — the lecture's PPT rows
                 # aren't registered yet.  _get_transcript re-checks with
                 # the hint and schedules the download then if needed.
                 if self._official_transcript_usable(segments):
-                    self._official_cache[sub_id] = segments
                     return False
             except Exception as e:
                 self._reporter.info(
@@ -233,19 +238,41 @@ class LectureRunner:
         duration hint is known (the last PPT screenshot offset, a lower
         bound on lecture length) — after the last segment (tail
         truncation)."""
-        if not segments:
-            return False
-        max_gap_ms = max_gap_minutes * 60_000
-        if segments[0]["start_ms"] > max_gap_ms:
-            return False
-        prev_end = segments[0]["end_ms"]
-        for seg in segments[1:]:
-            if seg["start_ms"] - prev_end > max_gap_ms:
+        # Keep the legacy signature for callers/tests. The production threshold
+        # remains 20 minutes; non-default values use the original gap-only path.
+        if max_gap_minutes != 20:
+            if not segments:
                 return False
-            prev_end = max(prev_end, seg["end_ms"])
-        if duration_hint_s and duration_hint_s * 1000 - prev_end > max_gap_ms:
-            return False
-        return True
+            max_gap_ms = max_gap_minutes * 60_000
+            ordered = sorted(segments, key=lambda s: s["start_ms"])
+            if ordered[0]["start_ms"] > max_gap_ms:
+                return False
+            prev_end = ordered[0]["end_ms"]
+            for seg in ordered[1:]:
+                if seg["start_ms"] - prev_end > max_gap_ms:
+                    return False
+                prev_end = max(prev_end, seg["end_ms"])
+            return not (
+                duration_hint_s
+                and duration_hint_s * 1000 - prev_end > max_gap_ms
+            )
+        mode, _ = assess_official_transcript(segments, duration_hint_s)
+        return mode == "complete"
+
+    def _probe_media_duration(self, course_id: str, sub_id: str) -> float | None:
+        """Probe the signed media URL locally; return None on any failure."""
+        try:
+            video_url = self._client.get_video_url(course_id, sub_id)
+            if not video_url:
+                return None
+            stream_url, headers = self._client.get_stream_params(video_url)
+            return self._transcriber.probe_duration(stream_url, headers)
+        except Exception as exc:
+            self._reporter.info(
+                f"    [Official transcript] duration probe failed: "
+                f"{type(exc).__name__}"
+            )
+            return None
 
     def _get_transcript(self, existing: dict | None, course_id: str,
                         sub_id: str) -> tuple[Optional[str], Optional[list]]:
@@ -264,17 +291,24 @@ class LectureRunner:
             return existing["transcript"], None
 
         # Try official transcript before firing up ASR (config-gated).
+        official: list[dict] | None = None
+        hybrid_intervals: list[tuple[float, float]] = []
+        official_duration: float | None = None
         if config.USE_OFFICIAL_TRANSCRIPT:
             try:
                 official = self._official_cache.pop(sub_id, None)
                 if official is None:
                     official = self._client.get_transcript_segments(sub_id)
-                # Phase B registered the PPT rows, so the last screenshot
-                # offset is available as a duration lower bound for the
-                # tail-truncation check.
-                duration_hint = self._db.get_max_ppt_created_sec(sub_id)
-                if self._official_transcript_usable(
-                        official, duration_hint_s=duration_hint):
+                # Prefer the actual media duration. The final PPT timestamp is
+                # only a lower-bound fallback when ffprobe cannot inspect the
+                # signed stream.
+                media_duration = self._probe_media_duration(course_id, sub_id)
+                official_duration = media_duration
+                duration_hint = (
+                    media_duration or self._db.get_max_ppt_created_sec(sub_id)
+                )
+                mode, gaps = assess_official_transcript(official, duration_hint)
+                if mode == "complete":
                     text = " ".join(s["text"] for s in official)
                     self._reporter.info(
                         f"    Using official transcript "
@@ -286,6 +320,17 @@ class LectureRunner:
                     # now instead of letting it run until Phase H.
                     self._release_audio(sub_id)
                     return text, official
+                if mode == "hybrid" and media_duration:
+                    hybrid_intervals = gaps
+                    self._reporter.info(
+                        f"    Official transcript has {len(gaps)} long gap(s); "
+                        "running local ASR only for missing intervals."
+                    )
+                else:
+                    self._reporter.info(
+                        "    Official transcript is incomplete; falling back "
+                        "to full local ASR."
+                    )
             except Exception as e:
                 self._reporter.info(
                     f"    [Official transcript] unavailable, falling back "
@@ -317,9 +362,26 @@ class LectureRunner:
             return None, None
 
         try:
-            transcript, segments = self._transcriber.transcribe_tail(
-                handle.path, handle.process, handle.stderr_chunks,
-            )
+            if hybrid_intervals and official:
+                gap_text, gap_segments = self._transcriber.transcribe_tail_intervals(
+                    handle.path, handle.process, handle.stderr_chunks,
+                    hybrid_intervals,
+                    expected_duration_s=official_duration,
+                )
+                if gap_text.strip():
+                    segments = merge_timed_segments(official, gap_segments)
+                    transcript = " ".join(s["text"] for s in segments)
+                else:
+                    self._reporter.info(
+                        "    Gap-only ASR returned no text; retrying full local ASR."
+                    )
+                    transcript, segments = self._transcriber.transcribe_tail(
+                        handle.path, handle.process, handle.stderr_chunks,
+                    )
+            else:
+                transcript, segments = self._transcriber.transcribe_tail(
+                    handle.path, handle.process, handle.stderr_chunks,
+                )
         except NoAudioStreamError as e:
             self._reporter.info("    [SKIP] Video-only (no audio stream).")
             self._db.update_error(sub_id, "transcribe", str(e))
@@ -382,4 +444,3 @@ class LectureRunner:
             self._reporter.info(
                 f"    [WARN] audio release failed: {type(e).__name__}"
             )
-
