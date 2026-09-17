@@ -2,9 +2,10 @@ name: iCourse Check
 
 on:
   schedule:
-    # Every day at 19:36 BTC (UTC + 8)
-    # 设计这个奇怪的时间是为了避免整点时的github队列峰值，避免排队过久。
-    - cron: "36 11 * * *"
+    # Beijing 18:07 primary run plus 22:07 retry for recordings published late.
+    # The non-round minute avoids the busiest GitHub Actions queue window.
+    - cron: "7 10 * * *"
+    - cron: "7 14 * * *"
   workflow_dispatch:
 
 permissions:
@@ -47,10 +48,10 @@ jobs:
         if: steps.cache-pip.outputs.cache-hit != 'true'
         run: pip install -r requirements.txt
 
-      - name: Install ffmpeg
+      - name: Install media and PDF dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg fonts-noto-cjk libpango-1.0-0 libcairo2
 
       - name: Cache ASR models
         id: cache-models
@@ -208,6 +209,7 @@ jobs:
           SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+          RECEIVER_EMAILS: ${{ secrets.RECEIVER_EMAILS }}
           # All secrets, JSON-encoded. provider_env.py exports only the
           # vars named by config.MODEL_PROVIDERS (api_key_env /
           # base_url_env), so user-defined providers with custom env-var

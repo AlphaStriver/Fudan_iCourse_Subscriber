@@ -3,6 +3,7 @@ import unittest
 from src.api.email_markdown import (
     build_attachment_filename,
     build_course_markdown,
+    build_pdf_attachment_filename,
 )
 
 
@@ -36,6 +37,10 @@ class EmailMarkdownTests(unittest.TestCase):
         self.assertEqual(
             filename,
             "课程_A_2026-09-14_to_2026-09-16.md",
+        )
+        self.assertEqual(
+            build_pdf_attachment_filename("课程/A", lectures),
+            "课程_A_2026-09-14_to_2026-09-16.pdf",
         )
 
 

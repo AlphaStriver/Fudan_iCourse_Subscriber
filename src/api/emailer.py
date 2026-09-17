@@ -1,3 +1,4 @@
+import base64
 import re
 import smtplib
 import time
@@ -10,6 +11,7 @@ from collections import OrderedDict
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.image import MIMEImage
+from email.mime.application import MIMEApplication
 from html import escape
 from email.utils import formataddr
 from urllib.parse import quote
@@ -21,6 +23,7 @@ from src.runtime import config
 from src.api.email_markdown import (
     build_attachment_filename,
     build_course_markdown,
+    build_pdf_attachment_filename,
 )
 
 _MD_EXTENSIONS= ["tables", "fenced_code", "nl2br", "sane_lists", "codehilite"]
@@ -109,6 +112,28 @@ blockquote {
 }
 ul, ol { padding-left: 24px; }
 li { margin-bottom: 4px; }
+"""
+
+_PDF_CSS = """\
+@page {
+    size: A4;
+    margin: 18mm 16mm;
+    @bottom-center {
+        content: counter(page) " / " counter(pages);
+        color: #7f8c8d;
+        font-size: 9pt;
+    }
+}
+body {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    font-family: "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+}
+img { max-width: 100% !important; height: auto !important; }
+nav { break-inside: avoid; }
+h2, h3, h4 { break-after: avoid; }
+pre, blockquote, table { break-inside: avoid; }
 """
 
 _MIN_INLINE_HEIGHT = 13  # minimum logical height for inline formulas (px)
@@ -276,6 +301,35 @@ def _resolve_src(url: str, img_data: bytes | None,
     return url
 
 
+def _prepare_pdf_html(html: str, cid_images: dict[str, bytes]) -> str:
+    """Inline CID formula images and add print-specific CSS."""
+    rendered = html
+    for cid, png_data in cid_images.items():
+        encoded = base64.b64encode(png_data).decode("ascii")
+        rendered = rendered.replace(
+            f"cid:{cid}", f"data:image/png;base64,{encoded}"
+        )
+    pdf_style = f"<style>{_PDF_CSS}</style>"
+    if "</head>" in rendered:
+        rendered = rendered.replace("</head>", f"{pdf_style}</head>", 1)
+    else:
+        rendered = f"{pdf_style}{rendered}"
+    return rendered
+
+
+def render_html_pdf(html: str, cid_images: dict[str, bytes],
+                    renderer=None) -> bytes:
+    """Render the already-built rich email HTML into a PDF.
+
+    ``renderer`` is injectable for unit tests.  Importing WeasyPrint lazily
+    keeps non-email tools usable when the optional native PDF stack is absent.
+    """
+    if renderer is None:
+        from weasyprint import HTML  # noqa: PLC0415
+        renderer = HTML
+    return renderer(string=_prepare_pdf_html(html, cid_images)).write_pdf()
+
+
 class Emailer:
     """Send course summary emails via QQ SMTP SSL."""
 
@@ -284,7 +338,7 @@ class Emailer:
         self.port = config.SMTP_PORT
         self.sender = config.SMTP_EMAIL
         self.password = config.SMTP_PASSWORD
-        self.receiver = config.RECEIVER_EMAIL
+        self.receivers = list(config.RECEIVER_EMAILS)
 
     def send(self, items: list[dict]) -> bool:
         """Send a single email containing all lecture summaries.
@@ -307,6 +361,9 @@ class Emailer:
         """
         if not items:
             return True
+        if not self.receivers:
+            print("[Emailer] No receiver configured.")
+            return False
 
         any_update = any(item.get("is_update") for item in items)
 
@@ -393,29 +450,64 @@ class Emailer:
         msg = MIMEMultipart("related")
         msg["Subject"] = subject
         msg["From"] = formataddr(("iCourse Subscriber", self.sender))
-        msg["To"] = self.receiver
+        # Keep personal recipient addresses out of message headers.  SMTP
+        # envelope delivery still sends the same message to every address.
+        msg["To"] = "undisclosed-recipients:;"
 
         msg_alt = MIMEMultipart("alternative")
         msg_alt.attach(MIMEText(plain, "plain", "utf-8"))
         msg_alt.attach(MIMEText(html, "html", "utf-8"))
         msg.attach(msg_alt)
 
-        # Keep the rich HTML preview while also providing a portable Markdown
-        # file for archiving.  The orchestrator sends one course per message,
-        # but retaining this loop keeps Emailer safe for other callers too.
-        for course_title, lectures in courses.items():
-            markdown_text = build_course_markdown(course_title, lectures)
-            markdown_part = MIMEText(markdown_text, "markdown", "utf-8")
-            markdown_part.add_header(
+        # Keep a portable Markdown representation ready as a fallback.  Normal
+        # delivery uses the HTML body plus PDF and does not duplicate content
+        # with a second attachment.
+        markdown_fallbacks = [
+            (
+                build_course_markdown(course_title, lectures),
+                build_attachment_filename(course_title, lectures),
+            )
+            for course_title, lectures in courses.items()
+        ]
+
+        # The PDF is rendered from the exact HTML body used by the email, so
+        # headings, tables, code blocks and already-rendered formula images
+        # remain consistent.  PDF failure is deliberately fail-open: the rich
+        # HTML is still sent and Markdown is attached as the archive fallback.
+        pdf_attached = False
+        try:
+            pdf_bytes = render_html_pdf(html, cid_images)
+            if len(courses) == 1:
+                course_title, lectures = next(iter(courses.items()))
+                pdf_filename = build_pdf_attachment_filename(
+                    course_title, lectures
+                )
+            else:
+                pdf_filename = "course-summaries.pdf"
+            pdf_part = MIMEApplication(pdf_bytes, _subtype="pdf")
+            pdf_part.add_header(
                 "Content-Disposition",
                 "attachment",
-                filename=(
-                    "utf-8",
-                    "",
-                    build_attachment_filename(course_title, lectures),
-                ),
+                filename=("utf-8", "", pdf_filename),
             )
-            msg.attach(markdown_part)
+            msg.attach(pdf_part)
+            pdf_attached = True
+            print(f"[Emailer] PDF ready ({len(pdf_bytes)} bytes)")
+        except Exception as e:
+            print(f"[Emailer] PDF generation skipped ({type(e).__name__}).")
+
+        if not pdf_attached:
+            for markdown_text, markdown_filename in markdown_fallbacks:
+                markdown_part = MIMEText(
+                    markdown_text, "markdown", "utf-8"
+                )
+                markdown_part.add_header(
+                    "Content-Disposition",
+                    "attachment",
+                    filename=("utf-8", "", markdown_filename),
+                )
+                msg.attach(markdown_part)
+            print("[Emailer] Attached Markdown fallback.")
 
         # Attach CID images
         for cid, png_data in cid_images.items():
@@ -433,7 +525,11 @@ class Emailer:
             try:
                 with smtplib.SMTP_SSL(self.host, self.port) as server:
                     server.login(self.sender, self.password)
-                    server.sendmail(self.sender, self.receiver, msg.as_string())
+                    rejected = server.sendmail(
+                        self.sender, self.receivers, msg.as_string()
+                    )
+                    if rejected:
+                        raise smtplib.SMTPRecipientsRefused(rejected)
                 print("[Emailer] Sent successfully (subject redacted)")
                 return True
             except Exception as e:

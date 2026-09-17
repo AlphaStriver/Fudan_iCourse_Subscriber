@@ -117,7 +117,7 @@ def _send_html_email(subject: str, html: str, plain: str,
     msg = MIMEMultipart("related")
     msg["Subject"] = subject
     msg["From"] = formataddr(("iCourse Subscriber", config.SMTP_EMAIL))
-    msg["To"] = config.RECEIVER_EMAIL
+    msg["To"] = "undisclosed-recipients:;"
 
     msg_alt = MIMEMultipart("alternative")
     msg_alt.attach(MIMEText(plain, "plain", "utf-8"))
@@ -133,7 +133,9 @@ def _send_html_email(subject: str, html: str, plain: str,
             msg.attach(img_part)
 
     with _smtp_connect() as server:
-        server.sendmail(config.SMTP_EMAIL, config.RECEIVER_EMAIL, msg.as_string())
+        server.sendmail(
+            config.SMTP_EMAIL, config.RECEIVER_EMAILS, msg.as_string()
+        )
 
 
 def _send_pdf_email(subject: str,
@@ -146,7 +148,7 @@ def _send_pdf_email(subject: str,
     msg = MIMEMultipart()
     msg["Subject"] = subject
     msg["From"] = formataddr(("iCourse Subscriber", config.SMTP_EMAIL))
-    msg["To"] = config.RECEIVER_EMAIL
+    msg["To"] = "undisclosed-recipients:;"
 
     for pdf_bytes, filename in attachments:
         part = MIMEBase("application", "pdf", name=filename)
@@ -156,7 +158,9 @@ def _send_pdf_email(subject: str,
         msg.attach(part)
 
     with _smtp_connect() as server:
-        server.sendmail(config.SMTP_EMAIL, config.RECEIVER_EMAIL, msg.as_string())
+        server.sendmail(
+            config.SMTP_EMAIL, config.RECEIVER_EMAILS, msg.as_string()
+        )
 
 def _send_md_email(subject: str, md_content: list[tuple[bytes, str]]) -> None:
     """Send an email with Markdown content.
@@ -167,7 +171,7 @@ def _send_md_email(subject: str, md_content: list[tuple[bytes, str]]) -> None:
     msg = MIMEMultipart()
     msg["Subject"] = subject
     msg["From"] = formataddr(("iCourse Subscriber", config.SMTP_EMAIL))
-    msg["To"] = config.RECEIVER_EMAIL
+    msg["To"] = "undisclosed-recipients:;"
 
     for md_bytes, filename in md_content:
         part = MIMEBase("text", "markdown", name=filename)
@@ -177,7 +181,9 @@ def _send_md_email(subject: str, md_content: list[tuple[bytes, str]]) -> None:
         msg.attach(part)
 
     with _smtp_connect() as server:
-        server.sendmail(config.SMTP_EMAIL, config.RECEIVER_EMAIL, msg.as_string())
+        server.sendmail(
+            config.SMTP_EMAIL, config.RECEIVER_EMAILS, msg.as_string()
+        )
 
 def _safe_filename(title: str) -> str:
     """Sanitise a course title for use as a filename."""
@@ -272,8 +278,11 @@ def main():
     if sub_ids:
         print(f"Filtering to {len(sub_ids)} selected lecture(s).")
 
-    if not config.SMTP_EMAIL or not config.SMTP_PASSWORD or not config.RECEIVER_EMAIL:
-        print("Email configuration incomplete. Set SMTP_EMAIL, SMTP_PASSWORD, RECEIVER_EMAIL.")
+    if not config.SMTP_EMAIL or not config.SMTP_PASSWORD or not config.RECEIVER_EMAILS:
+        print(
+            "Email configuration incomplete. Set SMTP_EMAIL, SMTP_PASSWORD, "
+            "and RECEIVER_EMAILS (or legacy RECEIVER_EMAIL)."
+        )
         sys.exit(1)
 
     if args.pdf:
