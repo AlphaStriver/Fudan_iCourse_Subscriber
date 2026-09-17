@@ -50,7 +50,8 @@
 | `GEMINI_API_KEY` | ⬜ | Gemini API Key | `AIza...` |
 | `SMTP_EMAIL` | ✅ | 用于发送邮件的 QQ 邮箱 | `123456@qq.com` |
 | `SMTP_PASSWORD` | ✅ | QQ 邮箱 SMTP **授权码**（不是登录密码） | `abcdefghijklmnop` |
-| `RECEIVER_EMAIL` | ✅ | 接收摘要邮件的邮箱 | `you@m.fudan.edu.com` |
+| `RECEIVER_EMAILS` | ✅ | 接收摘要邮件的邮箱，多个用英文逗号分隔 | `first@example.com,second@example.com` |
+| `RECEIVER_EMAIL` | ⬜ | 兼容旧部署的单个收件邮箱 | `you@m.fudan.edu.com` |
 
 > 至少配置一个 LLM API Key（DASHSCOPE、DEEPSEEK 或 GEMINI）。程序按配置顺序自动回退尝试。如果需要选择其他的LLM供应商，可以在`src\runtime\config.py`路径下自定义供应商。
 
@@ -81,11 +82,12 @@
 
 ### 第 6 步：运行
 
-- **自动运行**：默认每天 19:36（北京时间）自动执行
+- **自动运行**：每天 18:07（北京时间）主运行，22:07 自动补跑
 - **手动触发**：进入仓库 → Actions → **iCourse Check** → Run workflow。`Single Run`
   也默认优先使用官方字幕。
 
-首次运行会处理所有已有录播，后续只处理新增课次。详细的隐私配置步骤见
+每门课程单独发送邮件，正文为 HTML，并附带由相同 HTML 渲染的 PDF；PDF 失败时
+自动回退为 Markdown 附件。首次运行会处理所有已有录播，后续只处理新增课次。详细的隐私配置步骤见
 [个人部署说明](PERSONAL_DEPLOYMENT.md)。
 
 ## 前端页面（索引与查看）

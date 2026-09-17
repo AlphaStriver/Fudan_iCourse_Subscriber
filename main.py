@@ -346,7 +346,7 @@ def run():
     transcriber = Transcriber()
     summarizer = Summarizer() if config.COURSE_IDS else None
     emailer = Emailer() if (
-        config.SMTP_EMAIL and config.SMTP_PASSWORD
+        config.SMTP_EMAIL and config.SMTP_PASSWORD and config.RECEIVER_EMAILS
     ) else None
 
     vpn = login_with_retry()

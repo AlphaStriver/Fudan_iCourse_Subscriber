@@ -1,4 +1,5 @@
 import os
+import re
 
 from src.runtime.session_rules import parse_course_session_rules
 
@@ -117,7 +118,33 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 # QQ SMTP
 SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
-RECEIVER_EMAIL = os.environ.get("RECEIVER_EMAIL", "")
+
+
+def parse_receiver_emails(raw: str) -> list[str]:
+    """Parse, trim and de-duplicate a private recipient list.
+
+    Commas, semicolons and newlines are accepted so the GitHub Secret stays
+    convenient to edit.  Address syntax is intentionally left to the SMTP
+    server; this function only prevents empty and duplicate envelope entries.
+    """
+    recipients: list[str] = []
+    seen: set[str] = set()
+    for value in re.split(r"[,;\n\r]+", raw or ""):
+        address = value.strip()
+        key = address.casefold()
+        if address and key not in seen:
+            recipients.append(address)
+            seen.add(key)
+    return recipients
+
+
+_RECEIVER_EMAILS_RAW = (
+    os.environ.get("RECEIVER_EMAILS", "").strip()
+    or os.environ.get("RECEIVER_EMAIL", "").strip()
+)
+RECEIVER_EMAILS = parse_receiver_emails(_RECEIVER_EMAILS_RAW)
+# Backward-compatible first recipient for older integrations.
+RECEIVER_EMAIL = RECEIVER_EMAILS[0] if RECEIVER_EMAILS else ""
 SMTP_HOST = "smtp.qq.com"
 SMTP_PORT = 465
 

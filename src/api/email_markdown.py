@@ -30,3 +30,11 @@ def build_attachment_filename(course_title: str, lectures: list[dict]) -> str:
     else:
         suffix = f"{dates[0]}_to_{dates[-1]}"
     return f"{safe_title}_{suffix}.md"
+
+
+def build_pdf_attachment_filename(course_title: str,
+                                  lectures: list[dict]) -> str:
+    """Return the Markdown attachment name with a PDF suffix."""
+    return build_attachment_filename(course_title, lectures).removesuffix(
+        ".md"
+    ) + ".pdf"

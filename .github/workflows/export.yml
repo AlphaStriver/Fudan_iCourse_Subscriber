@@ -122,6 +122,7 @@ jobs:
           SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+          RECEIVER_EMAILS: ${{ secrets.RECEIVER_EMAILS }}
           # Manual text inputs are public run metadata. By default export the
           # subscribed courses; optional lecture filtering uses a secret too.
           EXPORT_COURSE_ID: ${{ secrets.EXPORT_COURSE_IDS || secrets.COURSE_IDS }}
