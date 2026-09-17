@@ -57,12 +57,15 @@ class Summarizer:
                 {"role": "system", "content": self.system_prompt},
                 {
                     "role": "user",
-                    # 注意：这里的 1:7 与 system prompt 中声称的 1:8 不一致是有意为之
-                    # （给模型一个略偏长的信号修正其实际输出偏短的倾向），勿"修复"。
-                    "content": f"以下是课程《{title}》的录音文本，根据长度，你应该输出的字符数大约为{len(content) // 7}字，请开始总结：\n\n{content}",
+                    "content": (
+                        f"以下是课程《{title}》的原始材料。请沿能够确认"
+                        "的授课脉络，将其整理为详细、连贯、适合复习的"
+                        "课程笔记。\n\n"
+                        f"<course_material>\n{content}\n</course_material>"
+                    ),
                 },
             ],
-            # temperature=0.3,
+            temperature=0.2,
             timeout=180,
         )
         if not response.choices:
