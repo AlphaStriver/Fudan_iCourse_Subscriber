@@ -1,5 +1,6 @@
 import email
 import unittest
+from email.header import decode_header, make_header
 from unittest.mock import patch
 
 from src.api.emailer import Emailer, _prepare_pdf_html, render_html_pdf
@@ -106,6 +107,31 @@ class EmailDeliveryTests(unittest.TestCase):
         filenames = [part.get_filename() for part in message.walk()]
         self.assertTrue(any(name and name.endswith(".md") for name in filenames))
         self.assertFalse(any(name and name.endswith(".pdf") for name in filenames))
+
+    @patch("src.api.emailer.smtplib.SMTP_SSL", _FakeSMTP)
+    def test_failure_notice_is_private_and_excludes_raw_error(self):
+        item = {
+            "course_title": "课程 A",
+            "sub_title": "第 1 讲",
+            "error_stage": "summarize",
+            "error_count": 3,
+            "error_msg": "secret signed URL must not leak",
+        }
+        self.assertTrue(self._emailer().send_failure_notice([item]))
+        _, recipients, raw = _FakeSMTP.calls[-1]
+        self.assertEqual(recipients, ["one@example.com", "two@example.com"])
+        message = email.message_from_string(raw)
+        self.assertEqual(message["To"], "undisclosed-recipients:;")
+        subject = str(make_header(decode_header(message["Subject"])))
+        self.assertEqual(subject, "[FiCS] 有课程课次需要处理")
+        body = "\n".join(
+            part.get_payload(decode=True).decode(part.get_content_charset())
+            for part in message.walk()
+            if part.get_content_type() in {"text/plain", "text/html"}
+        )
+        self.assertIn("课程 A", body)
+        self.assertIn("摘要生成", body)
+        self.assertNotIn("secret signed URL", body)
 
 
 if __name__ == "__main__":

@@ -143,6 +143,12 @@ _RECEIVER_EMAILS_RAW = (
     or os.environ.get("RECEIVER_EMAIL", "").strip()
 )
 RECEIVER_EMAILS = parse_receiver_emails(_RECEIVER_EMAILS_RAW)
+
+# Manual workflow switch.  A boolean input is used instead of a lecture ID so
+# a public repository's Actions metadata never exposes private course details.
+RETRY_ALL_FAILED = os.environ.get("RETRY_ALL_FAILED", "").strip().lower() in {
+    "1", "true", "yes", "on",
+}
 # Backward-compatible first recipient for older integrations.
 RECEIVER_EMAIL = RECEIVER_EMAILS[0] if RECEIVER_EMAILS else ""
 SMTP_HOST = "smtp.qq.com"

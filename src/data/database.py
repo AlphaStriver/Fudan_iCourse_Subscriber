@@ -197,9 +197,9 @@ class Database:
         """Return lectures that need (re-)processing.
 
         Only returns lectures whose ``error_count`` is below *max_errors* —
-        a permanently-failing lecture (e.g. ``get-sub-info`` RuntimeError
-        for a removed recording) is abandoned after that many attempts
-        rather than clogging every workflow run.
+        a repeatedly-failing lecture is paused after that many attempts and
+        surfaced through the attention notification path rather than
+        clogging every workflow run or disappearing silently.
         """
         query = (
             "SELECT * FROM lectures"
@@ -262,10 +262,70 @@ class Database:
         with self._lock, self.conn:
             self.conn.execute(
                 """UPDATE lectures
-                   SET error_stage = NULL, error_msg = NULL, error_count = 0
+                   SET error_stage = NULL, error_msg = NULL, error_count = 0,
+                       failure_notified_at = NULL
                    WHERE sub_id = ?""",
                 (sub_id,),
             )
+
+    def get_attention_lectures(
+        self, course_ids: list[str] | None = None, max_errors: int = 3,
+        only_unnotified: bool = True,
+    ) -> list[dict]:
+        """Return paused failures, optionally limited to unsent notices."""
+        query = (
+            "SELECT l.*, c.title AS course_title, c.teacher "
+            "FROM lectures l JOIN courses c ON l.course_id = c.course_id "
+            "WHERE l.processed_at IS NULL "
+            "AND COALESCE(l.error_count, 0) >= ?"
+        )
+        params: list[object] = [max_errors]
+        if only_unnotified:
+            query += " AND l.failure_notified_at IS NULL"
+        if course_ids:
+            placeholders = ",".join("?" for _ in course_ids)
+            query += f" AND l.course_id IN ({placeholders})"
+            params.extend(str(cid) for cid in course_ids)
+        query += " ORDER BY l.date, l.sub_id"
+        with self._lock:
+            rows = self.conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def mark_failure_notified_batch(self, sub_ids: list[str]) -> None:
+        """Record a successfully delivered failure notice."""
+        if not sub_ids:
+            return
+        now = datetime.now().isoformat()
+        with self._lock, self.conn:
+            self.conn.executemany(
+                """UPDATE lectures
+                   SET failure_notified_at = ?
+                   WHERE sub_id = ? AND processed_at IS NULL
+                     AND COALESCE(error_count, 0) >= 3""",
+                [(now, sub_id) for sub_id in sub_ids],
+            )
+
+    def retry_attention_lectures(self, sub_ids: list[str]) -> int:
+        """Re-arm selected paused failures for an immediate manual retry.
+
+        ``retry_generation`` makes the reset survive the additive database
+        merge used by the deployment workflow.
+        """
+        if not sub_ids:
+            return 0
+        placeholders = ",".join("?" for _ in sub_ids)
+        with self._lock, self.conn:
+            cur = self.conn.execute(
+                f"""UPDATE lectures
+                    SET error_stage = NULL, error_msg = NULL, error_count = 0,
+                        failure_notified_at = NULL,
+                        retry_generation = COALESCE(retry_generation, 0) + 1
+                    WHERE processed_at IS NULL
+                      AND COALESCE(error_count, 0) >= 3
+                      AND sub_id IN ({placeholders})""",
+                [str(sub_id) for sub_id in sub_ids],
+            )
+        return cur.rowcount or 0
 
     def update_ppt_page(self, sub_id: str, page_num: int,
                         text: str | None, status: str):
