@@ -76,10 +76,10 @@ def merge(local_path: str, remote_path: str):
                 INSERT OR IGNORE INTO main.lectures
                     (sub_id, course_id, sub_title, date, transcript, summary,
                      processed_at, emailed_at, error_msg, error_count, error_stage,
-                     summary_model)
+                     summary_model, failure_notified_at, retry_generation)
                 SELECT sub_id, course_id, sub_title, date, transcript, summary,
                        processed_at, emailed_at, error_msg, error_count, error_stage,
-                       summary_model
+                       summary_model, failure_notified_at, retry_generation
                 FROM local.lectures
             """)
 
@@ -96,18 +96,52 @@ def merge(local_path: str, remote_path: str):
                     error_msg = CASE
                         WHEN COALESCE(l.processed_at, main.lectures.processed_at) IS NOT NULL
                         THEN NULL
+                        WHEN COALESCE(l.retry_generation, 0) >
+                             COALESCE(main.lectures.retry_generation, 0)
+                        THEN l.error_msg
+                        WHEN COALESCE(l.retry_generation, 0) <
+                             COALESCE(main.lectures.retry_generation, 0)
+                        THEN main.lectures.error_msg
                         ELSE COALESCE(l.error_msg, main.lectures.error_msg)
                     END,
                     error_count = CASE
                         WHEN COALESCE(l.processed_at, main.lectures.processed_at) IS NOT NULL
                         THEN 0
+                        WHEN COALESCE(l.retry_generation, 0) >
+                             COALESCE(main.lectures.retry_generation, 0)
+                        THEN COALESCE(l.error_count, 0)
+                        WHEN COALESCE(l.retry_generation, 0) <
+                             COALESCE(main.lectures.retry_generation, 0)
+                        THEN COALESCE(main.lectures.error_count, 0)
                         ELSE MAX(COALESCE(l.error_count, 0), COALESCE(main.lectures.error_count, 0))
                     END,
                     error_stage = CASE
                         WHEN COALESCE(l.processed_at, main.lectures.processed_at) IS NOT NULL
                         THEN NULL
+                        WHEN COALESCE(l.retry_generation, 0) >
+                             COALESCE(main.lectures.retry_generation, 0)
+                        THEN l.error_stage
+                        WHEN COALESCE(l.retry_generation, 0) <
+                             COALESCE(main.lectures.retry_generation, 0)
+                        THEN main.lectures.error_stage
                         ELSE COALESCE(l.error_stage, main.lectures.error_stage)
-                    END
+                    END,
+                    failure_notified_at = CASE
+                        WHEN COALESCE(l.processed_at, main.lectures.processed_at) IS NOT NULL
+                        THEN NULL
+                        WHEN COALESCE(l.retry_generation, 0) >
+                             COALESCE(main.lectures.retry_generation, 0)
+                        THEN l.failure_notified_at
+                        WHEN COALESCE(l.retry_generation, 0) <
+                             COALESCE(main.lectures.retry_generation, 0)
+                        THEN main.lectures.failure_notified_at
+                        ELSE COALESCE(l.failure_notified_at,
+                                      main.lectures.failure_notified_at)
+                    END,
+                    retry_generation = MAX(
+                        COALESCE(l.retry_generation, 0),
+                        COALESCE(main.lectures.retry_generation, 0)
+                    )
                 FROM local.lectures l
                 WHERE main.lectures.sub_id = l.sub_id
             """)

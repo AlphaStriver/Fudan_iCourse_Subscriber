@@ -208,6 +208,7 @@ def _drive_lectures(client: ICourseClient, db: Database,
         except Exception as e:
             reporter.lecture_error(sub_id)
             reporter.info(f"    Error type: {type(e).__name__}")
+            db.update_error(sub_id, "pipeline", type(e).__name__)
         finally:
             # Belt-and-braces: drop any lingering prefetch entry for this
             # lecture so we don't leak bytes if the runner crashed before
@@ -263,6 +264,46 @@ def _send_email(emailer: Emailer | None, db: Database, reporter: Reporter,
                 reporter.email_failed()
         except Exception as e:
             reporter.info(f"[Email] Failed to send ({type(e).__name__}).")
+
+
+def _selected_attention_lectures(
+    db: Database, only_unnotified: bool = True
+) -> list[dict]:
+    """Return paused failures still covered by the private course rules."""
+    if not config.COURSE_IDS:
+        return []
+    rows = db.get_attention_lectures(
+        list(config.COURSE_IDS), only_unnotified=only_unnotified
+    )
+    return [
+        row for row in rows
+        if lecture_is_selected(
+            row["course_id"], row, config.COURSE_SESSION_RULES
+        )
+    ]
+
+
+def _send_failure_notices(emailer: Emailer | None, db: Database,
+                          reporter: Reporter) -> None:
+    """Send one notice for newly-paused failures and mark only on success."""
+    items = _selected_attention_lectures(db)
+    if not items:
+        return
+    if emailer is None:
+        reporter.info(
+            f"[Attention] {len(items)} paused lecture(s); email is not configured."
+        )
+        return
+    reporter.info(f"[Attention] Sending notice for {len(items)} lecture(s).")
+    try:
+        if emailer.send_failure_notice(items):
+            db.mark_failure_notified_batch([row["sub_id"] for row in items])
+        else:
+            reporter.info("[Attention] Notice delivery failed; will retry next run.")
+    except Exception as e:
+        reporter.info(
+            f"[Attention] Notice failed ({type(e).__name__}); will retry next run."
+        )
 
 
 def _crawl_semester_catalog(client: ICourseClient, db: Database,
@@ -340,6 +381,14 @@ def run():
         # Fall through — crawl-only mode is valid.
 
     db = Database()
+    if config.RETRY_ALL_FAILED:
+        attention = _selected_attention_lectures(db, only_unnotified=False)
+        retried = db.retry_attention_lectures(
+            [row["sub_id"] for row in attention]
+        )
+        reporter.info(
+            f"[Attention] Re-armed {retried} paused lecture(s) for manual retry."
+        )
     corrected = db.sync_dates_from_sub()
     if corrected:
         print(f"  [Date] Synced {corrected} lecture date(s) from sub_title", flush=True)
@@ -375,6 +424,7 @@ def run():
         scheduler.shutdown()
 
     _send_email(emailer, db, reporter, email_items)
+    _send_failure_notices(emailer, db, reporter)
     reporter.run_footer()
 
 

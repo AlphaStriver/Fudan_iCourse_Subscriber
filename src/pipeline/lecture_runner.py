@@ -352,7 +352,7 @@ class LectureRunner:
             # AudioDownloader returns None when get_video_url() returned
             # None — i.e. the lecture has no playable video.  Record an
             # error so the lecture is retried (the video may appear later)
-            # but abandoned after max_errors instead of every day forever.
+            # and then paused with a private notice after max_errors.
             # The "no_video" stage is a contract with the frontend, which
             # renders it as a gray "无视频" hint instead of a red failure.
             self._reporter.lecture_skip_no_video(
@@ -384,8 +384,9 @@ class LectureRunner:
                 )
         except NoAudioStreamError as e:
             self._reporter.info("    [SKIP] Video-only (no audio stream).")
-            self._db.update_error(sub_id, "transcribe", str(e))
-            self._db.mark_processed(sub_id)
+            # Do not mark this as processed: retry it like other media
+            # failures, then surface it through the attention notice.
+            self._db.update_error(sub_id, "no_audio", str(e))
             self._release_audio(sub_id)
             return None, None
         except IncompleteAudioError as e:

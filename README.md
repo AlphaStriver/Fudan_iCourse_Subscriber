@@ -86,6 +86,10 @@
 - **手动触发**：进入仓库 → Actions → **iCourse Check** → Run workflow。`Single Run`
   也默认优先使用官方字幕。
 
+同一课次连续失败三次后会暂停自动重试，并向收件邮箱发送一次不含异常原文和签名
+URL 的失败摘要。需要重试时运行 `Single Run`，勾选
+`Retry all paused failed lectures`；该开关不会在公开参数中暴露课程或课次 ID。
+
 每门课程单独发送邮件，正文为 HTML，并附带由相同 HTML 渲染的 PDF；PDF 失败时
 自动回退为 Markdown 附件。首次运行会处理所有已有录播，后续只处理新增课次。详细的隐私配置步骤见
 [个人部署说明](PERSONAL_DEPLOYMENT.md)。

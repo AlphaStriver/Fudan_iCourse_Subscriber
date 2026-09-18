@@ -8,6 +8,11 @@ on:
         required: false
         default: true
         type: boolean
+      retry_all_failed:
+        description: "Retry all paused failed lectures"
+        required: false
+        default: false
+        type: boolean
 permissions:
   contents: write
 
@@ -199,6 +204,7 @@ jobs:
           COURSE_IDS: ${{ secrets.COURSE_IDS }}
           COURSE_SESSION_RULES: ${{ secrets.COURSE_SESSION_RULES }}
           USE_OFFICIAL_TRANSCRIPT: ${{ inputs.use_official_transcript && '1' || '' }}
+          RETRY_ALL_FAILED: ${{ inputs.retry_all_failed && '1' || '' }}
           SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
           SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
           RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}

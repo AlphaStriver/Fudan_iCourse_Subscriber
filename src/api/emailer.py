@@ -340,6 +340,95 @@ class Emailer:
         self.password = config.SMTP_PASSWORD
         self.receivers = list(config.RECEIVER_EMAILS)
 
+    def _deliver(self, msg) -> bool:
+        """Deliver an already-built message without exposing recipients."""
+        for attempt in range(3):
+            try:
+                with smtplib.SMTP_SSL(self.host, self.port) as server:
+                    server.login(self.sender, self.password)
+                    rejected = server.sendmail(
+                        self.sender, self.receivers, msg.as_string()
+                    )
+                    if rejected:
+                        raise smtplib.SMTPRecipientsRefused(rejected)
+                print("[Emailer] Sent successfully (subject redacted)")
+                return True
+            except Exception as e:
+                print(f"[Emailer] Attempt {attempt + 1}/3 failed: "
+                      f"{type(e).__name__}")
+                if attempt < 2:
+                    time.sleep(2 ** attempt)
+
+        print("[Emailer] All send attempts failed.")
+        return False
+
+    def send_failure_notice(self, items: list[dict]) -> bool:
+        """Send one private, deduplicated digest for paused lecture failures.
+
+        Raw exception messages and identifiers are deliberately excluded:
+        only course/lecture labels, the processing stage, and attempt count
+        are needed for the user to decide whether to retry.
+        """
+        if not items:
+            return True
+        if not self.receivers:
+            print("[Emailer] No receiver configured.")
+            return False
+
+        stage_labels = {
+            "no_video": "录播暂不可用",
+            "no_audio": "录播没有音轨",
+            "transcribe": "语音转写",
+            "summarize": "摘要生成",
+            "pipeline": "课程处理",
+        }
+        plain_lines = [
+            "以下课次连续处理失败，已暂停自动重试：",
+            "",
+        ]
+        html_rows = []
+        for item in items:
+            stage = stage_labels.get(item.get("error_stage"), "课程处理")
+            attempts = int(item.get("error_count") or 0)
+            course_title = str(item.get("course_title") or "未知课程")
+            sub_title = str(item.get("sub_title") or "未知课次")
+            plain_lines.append(
+                f"- {course_title} / {sub_title}：{stage}，失败 {attempts} 次"
+            )
+            html_rows.append(
+                "<tr>"
+                f"<td>{escape(course_title)}</td>"
+                f"<td>{escape(sub_title)}</td>"
+                f"<td>{escape(stage)}</td>"
+                f"<td>{attempts}</td>"
+                "</tr>"
+            )
+
+        instruction = (
+            "系统不会继续每天重复尝试。如需重试，请手动运行 Single Run，"
+            "并勾选“Retry all paused failed lectures”。"
+        )
+        plain_lines.extend(["", instruction])
+        html = (
+            "<!DOCTYPE html><html><head><meta charset='utf-8'></head><body>"
+            "<p>以下课次连续处理失败，已暂停自动重试：</p>"
+            "<table style='border-collapse:collapse' border='1' cellpadding='6'>"
+            "<thead><tr><th>课程</th><th>课次</th><th>阶段</th>"
+            "<th>失败次数</th></tr></thead><tbody>"
+            + "".join(html_rows)
+            + "</tbody></table>"
+            f"<p>{escape(instruction)}</p>"
+            "</body></html>"
+        )
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = "[FiCS] 有课程课次需要处理"
+        msg["From"] = formataddr(("iCourse Subscriber", self.sender))
+        msg["To"] = "undisclosed-recipients:;"
+        msg.attach(MIMEText("\n".join(plain_lines), "plain", "utf-8"))
+        msg.attach(MIMEText(html, "html", "utf-8"))
+        return self._deliver(msg)
+
     def send(self, items: list[dict]) -> bool:
         """Send a single email containing all lecture summaries.
 
@@ -520,23 +609,4 @@ class Emailer:
         if cid_images:
             print(f"[Emailer] Embedded {len(cid_images)} LaTeX images as CID")
 
-        # Retry with exponential backoff
-        for attempt in range(3):
-            try:
-                with smtplib.SMTP_SSL(self.host, self.port) as server:
-                    server.login(self.sender, self.password)
-                    rejected = server.sendmail(
-                        self.sender, self.receivers, msg.as_string()
-                    )
-                    if rejected:
-                        raise smtplib.SMTPRecipientsRefused(rejected)
-                print("[Emailer] Sent successfully (subject redacted)")
-                return True
-            except Exception as e:
-                print(f"[Emailer] Attempt {attempt + 1}/3 failed: "
-                      f"{type(e).__name__}")
-                if attempt < 2:
-                    time.sleep(2 ** attempt)
-
-        print("[Emailer] All send attempts failed.")
-        return False
+        return self._deliver(msg)
