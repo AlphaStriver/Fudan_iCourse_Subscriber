@@ -3,7 +3,13 @@ import unittest
 from email.header import decode_header, make_header
 from unittest.mock import patch
 
-from src.api.emailer import Emailer, _prepare_pdf_html, render_html_pdf
+from src.api.emailer import (
+    Emailer,
+    _EMAIL_CSS,
+    _md_to_html,
+    _prepare_pdf_html,
+    render_html_pdf,
+)
 from src.runtime.config import parse_receiver_emails
 
 
@@ -70,6 +76,11 @@ class EmailDeliveryTests(unittest.TestCase):
         )
         self.assertTrue(result.startswith(b"%PDF"))
         self.assertIn("data:image/png;base64,", _FakePDFRenderer.last_html)
+
+    def test_markdown_emphasis_is_rendered_as_red_highlight(self):
+        rendered = _md_to_html("这是一个**关键结论**。")
+        self.assertIn("<strong>关键结论</strong>", rendered)
+        self.assertIn("strong { color: #c0392b; }", _EMAIL_CSS)
 
     def _emailer(self):
         sender = Emailer()
