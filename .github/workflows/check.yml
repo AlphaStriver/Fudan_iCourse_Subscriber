@@ -2,11 +2,11 @@ name: iCourse Check
 
 on:
   schedule:
-    # Beijing 17:07 primary run. 20:07 is a conditional fallback: it only
+    # Beijing 09:00 primary run. 11:00 is a conditional fallback: it only
     # continues when today's primary scheduled run has not started or failed.
-    # The non-round minute avoids the busiest GitHub Actions queue window.
-    - cron: "7 9 * * *"
-    - cron: "7 12 * * *"
+    # Cron times are UTC; Beijing = UTC+8.
+    - cron: "0 1 * * *"
+    - cron: "0 3 * * *"
   workflow_dispatch:
 
 permissions:
@@ -32,14 +32,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
         run: |
-          # Manual runs and the 17:07 primary run always continue.
+          # Manual runs and the 09:00 primary run always continue.
           if [ "$EVENT_NAME" != "schedule" ] || \
-             [ "$EVENT_SCHEDULE" != "7 12 * * *" ]; then
+             [ "$EVENT_SCHEDULE" != "0 3 * * *" ]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # At 20:07, skip the expensive pipeline only when a useful scheduled
+          # At 11:00, skip the expensive pipeline only when a useful scheduled
           # run has already appeared today in Beijing time. A queued/running
           # primary counts; a completed primary counts only when successful.
           day_start_utc=$(python3 - <<'PY'
@@ -70,10 +70,10 @@ jobs:
             )] | length')
 
           if [ "$prior_useful_runs" -gt 0 ]; then
-            echo "A scheduled run already started today; skipping 20:07 fallback."
+            echo "A scheduled run already started today; skipping 11:00 fallback."
             echo "should_run=false" >> "$GITHUB_OUTPUT"
           else
-            echo "No useful scheduled run started today; running 20:07 fallback."
+            echo "No useful scheduled run started today; running 11:00 fallback."
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           fi
 
